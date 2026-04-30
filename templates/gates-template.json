@@ -1,0 +1,35 @@
+{
+  "workflow_name": "claude-yolo-until-done",
+  "gates": [
+    {
+      "id": "stage-01",
+      "name": "runtime-and-bundle-validation",
+      "required": true,
+      "passed": false
+    },
+    {
+      "id": "stage-02",
+      "name": "run-state-next-step-claim",
+      "required": true,
+      "passed": false
+    },
+    {
+      "id": "stage-03",
+      "name": "fix-loop-verification",
+      "required": true,
+      "passed": false
+    },
+    {
+      "id": "stage-04",
+      "name": "blocker-classification",
+      "required": true,
+      "passed": false
+    },
+    {
+      "id": "stage-05",
+      "name": "final-acceptance",
+      "required": true,
+      "passed": false
+    }
+  ]
+}
