@@ -10,8 +10,11 @@ HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
-from common import human_blocked_evidence_is_valid
 from hook_settings import uninstall_hook_set
+from validate_completion import run as validate_completion
+
+
+ACTIVE_STATUSES = {"active", "needs_review", "rework_required", "approved"}
 
 
 def load_stdin_json() -> dict:
@@ -43,27 +46,23 @@ def hook_run_root_arg(project_dir: Path, run_root: Path) -> str:
 
 
 def session_start(project_dir: Path, run_root: Path) -> int:
-    run_state_path = run_root / "run_state.json"
-    if not run_state_path.exists():
+    state_path = run_root / "state.json"
+    if not state_path.exists():
         return 0
 
-    run_state = load_json(run_state_path)
-    lifecycle_state = run_state.get("lifecycle_state", "active")
-    if lifecycle_state in {"paused", "deactivated"}:
-        return 0
-    if not run_state.get("workflow_active"):
+    state = load_json(state_path)
+    if state.get("status") == "complete":
         return 0
 
     additional_context = "\n".join(
         [
-            "A claude-yolo-until-done run bundle appears active for this project based on run_state.json.",
+            "A lightweight worker-watcher workflow is active for this project.",
             f"Run bundle: {run_root}",
-            f"Current stage: {run_state.get('current_stage')}",
-            f"Current target: {run_state.get('current_target')}",
-            f"Current issue: {run_state.get('current_issue')}",
-            f"Next action: {run_state.get('next_action')}",
-            "Re-validate runtime assumptions and continue from the bundle on disk instead of trusting this note alone.",
-            "Do not stop unless completion_ready is true or a structured human-blocked condition has been re-validated.",
+            f"Status: {state.get('status')}",
+            f"Owner: {state.get('owner')}",
+            f"Goal: {state.get('goal')}",
+            f"Next action: {state.get('next_action')}",
+            "Reload state.json and continue from the durable state on disk.",
         ]
     )
     payload = {
@@ -80,44 +79,45 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
     if hook_input.get("stop_hook_active") is True:
         return 0
 
-    run_state_path = run_root / "run_state.json"
-    if not run_state_path.exists():
+    state_path = run_root / "state.json"
+    if not state_path.exists():
         return 0
 
-    run_state = load_json(run_state_path)
-    lifecycle_state = run_state.get("lifecycle_state", "active")
-    if lifecycle_state in {"paused", "deactivated"}:
-        return 0
-    if not run_state.get("workflow_active"):
+    state = load_json(state_path)
+    status = state.get("status")
+    if status in ACTIVE_STATUSES:
+        reason = f"Workflow status is {status}; continue the current goal instead of stopping."
+        print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
         return 0
 
-    if run_state.get("human_blocked") is True:
-        valid_blocker, _ = human_blocked_evidence_is_valid(run_root, run_state)
-        if valid_blocker:
-            return 0
+    if status == "complete":
+        report = validate_completion(run_root)
+        if not report.get("passed"):
+            print(
+                json.dumps(
+                    {
+                        "decision": "block",
+                        "reason": "Workflow says complete but completion validation still fails.",
+                    },
+                    ensure_ascii=True,
+                )
+            )
+        return 0
 
-    reason = (
-        "claude-yolo-until-done is still active. "
-        f"Current stage: {run_state.get('current_stage')}. "
-        f"Next action: {run_state.get('next_action')}. "
-        f"Reload {run_state_path}, re-validate the bundle state, continue the current gate, and do not stop yet."
-    )
-    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
     return 0
 
 
 def session_end(project_dir: Path, run_root: Path, settings_file: str) -> int:
-    run_state_path = run_root / "run_state.json"
-    if not run_state_path.exists():
+    state_path = run_root / "state.json"
+    if not state_path.exists():
         return 0
 
-    run_state = load_json(run_state_path)
-    lifecycle_state = run_state.get("lifecycle_state", "active")
-    should_cleanup = (
-        (run_state.get("completion_ready") is True and run_state.get("workflow_active") is False)
-        or lifecycle_state == "deactivated"
-    )
-    if not should_cleanup:
+    state = load_json(state_path)
+    if state.get("status") != "complete":
+        return 0
+
+    report = validate_completion(run_root)
+    if not report.get("passed"):
         return 0
 
     settings_path = (project_dir / settings_file).resolve()

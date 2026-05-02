@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import json
 import sys
+from pathlib import Path
 
 from hook_settings import install_hook_set
 
@@ -22,15 +22,6 @@ def main() -> int:
     python_exe = Path(sys.executable).resolve()
 
     install_hook_set(settings_path, python_exe, bridge_path, args.run_root, args.settings_file)
-    runtime_marker_path = (project_dir / args.run_root / "runtime_context.json").resolve()
-    if runtime_marker_path.exists():
-        payload = json.loads(runtime_marker_path.read_text(encoding="utf-8-sig"))
-        payload["operator_asserted_hooks_available"] = True
-        payload["hook_settings_path"] = str(settings_path)
-        payload["hook_install_marker"] = "claude-yolo-until-done"
-        payload["installed_with_python"] = str(python_exe)
-        runtime_marker_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-
     print(json.dumps({"settings_path": str(settings_path), "project_dir": str(project_dir)}, ensure_ascii=True))
     return 0
 

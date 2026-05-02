@@ -70,6 +70,24 @@ REQUIRED_RUNTIME_FIELDS = (
     "notes",
 )
 
+REQUIRED_STATE_FIELDS = (
+    "goal",
+    "success_criteria",
+    "status",
+    "worker_claim",
+    "files_changed",
+    "verification_command",
+    "verification_result",
+    "submitted_at",
+    "review",
+    "reviewed_at",
+    "owner",
+    "next_action",
+    "plan_path",
+    "spec_path",
+    "updated_at",
+)
+
 ALLOWED_BLOCKER_TYPES = {
     "gui-os-dialog",
     "external-auth-login",
@@ -89,7 +107,7 @@ def base_report(stage: int | str, run_root: Path) -> dict:
         "passed": True,
         "checked_at": utc_now(),
         "run_root": str(run_root),
-        "run_state_path": str(run_root / "run_state.json"),
+        "run_state_path": str(run_root / "state.json"),
         "checks": [],
         "failures": [],
         "warnings": [],
@@ -115,6 +133,31 @@ def load_json(path: Path) -> dict:
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def state_path(run_root: Path) -> Path:
+    return run_root / "state.json"
+
+
+def trace_path(run_root: Path) -> Path:
+    return run_root / "trace.md"
+
+
+def load_state(run_root: Path) -> dict:
+    return load_json(state_path(run_root))
+
+
+def load_trace_text(run_root: Path) -> str:
+    return trace_path(run_root).read_text(encoding="utf-8-sig")
+
+
+def validate_required_state_fields(report: dict, state: dict) -> bool:
+    ok = True
+    for field_name in REQUIRED_STATE_FIELDS:
+        present = field_name in state
+        add_check(report, f"state_field_{field_name}_present", present, f"field={field_name}")
+        ok = ok and present
+    return ok
 
 
 def skill_roots() -> list[Path]:
@@ -199,6 +242,31 @@ def checkoff_map(checkoffs_payload: dict) -> dict[str, dict]:
 
 def report_text(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig")
+
+
+def verification_status_kind(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if text.startswith("failed"):
+        return "failed"
+    if text.startswith("passed"):
+        return "passed"
+    if text in {"not-run", "unknown"}:
+        return text
+    return text
+
+
+def report_has_verification_markers(run_root: Path, before_kind: str, after_kind: str) -> tuple[bool, list[str]]:
+    body = report_text(run_root / "report.md")
+    failures: list[str] = []
+    if "## Verification" not in body:
+        failures.append("missing verification section")
+    if f"- Before status: {before_kind}" not in body:
+        failures.append(f"missing before status {before_kind}")
+    if f"- After status: {after_kind}" not in body:
+        failures.append(f"missing after status {after_kind}")
+    return len(failures) == 0, failures
 
 
 def stage_id(value: int) -> str:

@@ -28,12 +28,36 @@ class SessionEndCleanupTest(unittest.TestCase):
 
             run_root.mkdir(parents=True)
             install_hook_set(settings_path, Path(sys.executable), bridge_path, "artifacts/yolo", ".claude/settings.local.json")
-            run_state = {
-                "completion_ready": True,
-                "workflow_active": False,
-                "lifecycle_state": "completed",
+            state = {
+                "goal": "Fix it.",
+                "success_criteria": ["It works."],
+                "status": "complete",
+                "worker_claim": "Updated src/app.py.",
+                "files_changed": ["src/app.py"],
+                "verification_command": "pytest -q",
+                "verification_result": "passed: 1 passed",
+                "submitted_at": "2026-05-01T00:00:00Z",
+                "review": {
+                    "verdict": "approve",
+                    "scope_checked": ["src/app.py"],
+                    "problems": [],
+                    "required_rework": [],
+                    "acceptance_basis": ["verification passed freshly"],
+                },
+                "reviewed_at": "2026-05-01T00:01:00Z",
+                "owner": "watcher",
+                "next_action": "complete",
+                "plan_path": "docs/plan.md",
+                "spec_path": "docs/spec.md",
+                "updated_at": "2026-05-01T00:01:00Z",
             }
-            (run_root / "run_state.json").write_text(json.dumps(run_state), encoding="utf-8")
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated src/app.py.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
 
             session_end(project_dir, run_root, ".claude/settings.local.json")
 

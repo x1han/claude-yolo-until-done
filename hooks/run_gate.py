@@ -10,28 +10,20 @@ from common import write_json
 
 
 MODULES = {
-    1: "gate_01",
-    2: "gate_02",
-    3: "gate_03",
-    4: "gate_04",
-    5: "gate_05",
+    "submission": "validate_submission",
+    "completion": "validate_completion",
 }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a claude-yolo-until-done gate hook.")
-    parser.add_argument("--stage", required=True, type=int, help="Gate stage number")
+    parser = argparse.ArgumentParser(description="Run a claude-yolo-until-done lightweight validator hook.")
+    parser.add_argument("--validator", required=True, choices=sorted(MODULES), help="Validator name")
     parser.add_argument(
         "--run-root",
         default="artifacts/yolo",
-        help="Path to the yolo run bundle root containing run_state.json and related files",
+        help="Path to the lightweight workflow root containing state.json",
     )
     args = parser.parse_args()
-
-    module_name = MODULES.get(args.stage)
-    if not module_name:
-        print(f"No hook implemented for stage {args.stage}", file=sys.stderr)
-        return 2
 
     hooks_dir = Path(__file__).resolve().parent
     if str(hooks_dir) not in sys.path:
@@ -41,9 +33,9 @@ def main() -> int:
     artifacts_dir = run_root / "hooks"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    module = importlib.import_module(module_name)
+    module = importlib.import_module(MODULES[args.validator])
     report = module.run(run_root=run_root)
-    out_path = artifacts_dir / f"gate_{args.stage:02d}_report.json"
+    out_path = artifacts_dir / f"{args.validator}_report.json"
     write_json(out_path, report)
     print(str(out_path))
     return 0 if report.get("passed") else 1

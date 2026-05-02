@@ -1,0 +1,17 @@
+{
+  "goal": "",
+  "success_criteria": [],
+  "status": "active",
+  "worker_claim": "",
+  "files_changed": [],
+  "verification_command": "",
+  "verification_result": "",
+  "submitted_at": "",
+  "review": {},
+  "reviewed_at": "",
+  "owner": "worker",
+  "next_action": "worker_update",
+  "plan_path": "plans/implementation-plan.md",
+  "spec_path": "specs/approved-spec.md",
+  "updated_at": ""
+}
