@@ -1,6 +1,6 @@
 # Blocker Rules
 
-The workflow must continue by default. It may hand control back to the user only when the blocker positively matches the human-blocked whitelist.
+The workflow must continue by default. It should hand control back to the user only when the blocker truly cannot be resolved from the current repository or machine.
 
 ## Allowed Human-Blocked Conditions
 - GUI or OS permission dialogs the agent cannot operate around
@@ -11,26 +11,17 @@ The workflow must continue by default. It may hand control back to the user only
 
 ## Not Allowed As Human Blockers
 - context compression
-- uncertainty about the next plan step when the run bundle exists
+- uncertainty about the next plan step when durable workflow state exists
 - a new bug that can be fixed locally
 - a failed test that has not yet been investigated
 - fatigue, complexity, or long task length
-- missing courage to continue
 
 ## Required Blocker Handling
 Before classifying a blocker as human-blocked:
 
-- verify the current stage and next action from `run_state.json`
+- verify the current status and next action from `state.json`
 - verify the blocker is not locally fixable
-- record structured blocker evidence in `run_state.json`, including:
-  - `blocker_type`
-  - `blocker_evidence`
-  - `local_fix_attempted`
-  - `why_not_locally_fixable`
-  - `blocker_recorded_at`
-- record the blocker in `report.md`
-- update `run_state.json`
-- update `resume.md`
-- produce or refresh the relevant hook result if a blocker hook exists
+- record the blocker clearly in `trace.md`
+- keep the durable state honest about what is blocked and why
 
 If the blocker does not match the whitelist, continue the workflow.

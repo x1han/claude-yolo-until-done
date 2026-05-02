@@ -4,24 +4,18 @@ This workflow may stop only when completion is positively verified.
 
 Minimum completion conditions:
 
-- every required plan gate passed
-- every required verification target for the active scope passed
-- every required checkoff marker is complete
-- `run_state.json` marks `completion_ready` as true
-- `run_state.json` records concrete completion evidence, including:
-  - `final_verdict`
-  - `final_summary`
-  - `final_verification_evidence`
-  - `remaining_non_blockers`
-  - `completion_reason`
-  - `completion_recorded_at`
-- the corresponding completion hook passed
-- `report.md` and `resume.md` reflect the final state of the run
+- `state.json` says the workflow is `complete`
+- the durable review verdict is `approve`
+- the review contains concrete acceptance basis
+- required worker submission evidence is still present
+- `trace.md` records the watcher review and watcher completion events
+- the corresponding completion validator passes
+- only then may the session-end cleanup remove the local hooks
 
 The workflow may not stop just because:
 
 - code was changed
 - one test passed
-- one issue was fixed
-- the agent produced a convincing summary
+- one file was edited
+- the worker wrote a convincing summary
 - the remaining work feels small
