@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--validator", required=True, choices=sorted(MODULES), help="Validator name")
     parser.add_argument(
         "--run-root",
-        default="artifacts/yolo",
+        default=".yolo",
         help="Path to the lightweight workflow root containing state.json",
     )
     args = parser.parse_args()

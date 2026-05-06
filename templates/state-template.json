@@ -11,6 +11,7 @@
   "reviewed_at": "",
   "owner": "worker",
   "next_action": "worker_update",
+  "cleanup_required": false,
   "plan_path": "plans/implementation-plan.md",
   "spec_path": "specs/approved-spec.md",
   "updated_at": ""

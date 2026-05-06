@@ -98,6 +98,7 @@ class ValidatorsTest(unittest.TestCase):
                         "reviewed_at": "2026-05-01T00:01:00Z",
                         "owner": "watcher",
                         "next_action": "complete",
+                        "cleanup_required": True,
                         "plan_path": "docs/plan.md",
                         "spec_path": "docs/spec.md",
                         "updated_at": "2026-05-01T00:01:00Z",

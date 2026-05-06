@@ -10,11 +10,12 @@ HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
-from hook_settings import uninstall_hook_set
 from validate_completion import run as validate_completion
 
 
 ACTIVE_STATUSES = {"active", "needs_review", "rework_required", "approved"}
+CONTINUE_TOKENS = ("继续 yolo", "continue yolo")
+PROMPT_FIELDS = ("prompt", "text", "userPrompt")
 
 
 def load_stdin_json() -> dict:
@@ -38,11 +39,35 @@ def resolve_run_root(project_dir: Path, run_root_arg: str) -> Path:
     return project_dir / candidate
 
 
-def hook_run_root_arg(project_dir: Path, run_root: Path) -> str:
-    try:
-        return run_root.relative_to(project_dir).as_posix()
-    except ValueError:
-        return str(run_root)
+def extract_prompt_text(hook_input: dict) -> str:
+    for field in PROMPT_FIELDS:
+        value = hook_input.get(field)
+        if isinstance(value, str):
+            return value.strip()
+    return ""
+
+
+def is_explicit_continue_choice(hook_input: dict) -> bool:
+    prompt_text = extract_prompt_text(hook_input).lower()
+    return any(token in prompt_text for token in CONTINUE_TOKENS)
+
+
+def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None) -> dict:
+    status = state.get("status")
+    cleanup_required = bool(state.get("cleanup_required"))
+    if status in ACTIVE_STATUSES or cleanup_required:
+        if is_explicit_continue_choice(hook_input or {}):
+            return {}
+        return {
+            "decision": "block",
+            "reason": (
+                "claude-yolo 仍处于挂载状态。当前必须三选一："
+                "1) 暂停，保留中间文件并清理 hooks；"
+                "2) 取消，清理中间文件和 hooks；"
+                "3) 继续 yolo。"
+            ),
+        }
+    return {}
 
 
 def session_start(project_dir: Path, run_root: Path) -> int:
@@ -51,7 +76,7 @@ def session_start(project_dir: Path, run_root: Path) -> int:
         return 0
 
     state = load_json(state_path)
-    if state.get("status") == "complete":
+    if state.get("status") == "complete" and not state.get("cleanup_required"):
         return 0
 
     additional_context = "\n".join(
@@ -90,6 +115,18 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
         print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
         return 0
 
+    if state.get("cleanup_required"):
+        print(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": "Workflow completion still requires claude-yolo cleanup before stopping.",
+                },
+                ensure_ascii=True,
+            )
+        )
+        return 0
+
     if status == "complete":
         report = validate_completion(run_root)
         if not report.get("passed"):
@@ -107,32 +144,22 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
     return 0
 
 
-def session_end(project_dir: Path, run_root: Path, settings_file: str) -> int:
+def user_prompt_submit(project_dir: Path, run_root: Path, hook_input: dict) -> int:
     state_path = run_root / "state.json"
     if not state_path.exists():
         return 0
 
-    state = load_json(state_path)
-    if state.get("status") != "complete":
-        return 0
-
-    report = validate_completion(run_root)
-    if not report.get("passed"):
-        return 0
-
-    settings_path = (project_dir / settings_file).resolve()
-    bridge_path = Path(__file__).resolve()
-    python_exe = Path(sys.executable).resolve()
-    uninstall_hook_set(settings_path, python_exe, bridge_path, hook_run_root_arg(project_dir, run_root), settings_file)
+    payload = build_user_prompt_submit_payload(load_json(state_path), hook_input)
+    if payload:
+        print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Claude Code hook bridge for claude-yolo-until-done.")
-    parser.add_argument("--event", required=True, choices=["session-start", "stop", "session-end"])
+    parser.add_argument("--event", required=True, choices=["session-start", "stop", "user-prompt-submit"])
     parser.add_argument("--project-dir", required=True, help="Claude project directory")
-    parser.add_argument("--run-root", default="artifacts/yolo", help="Run bundle root relative to the project dir unless absolute")
-    parser.add_argument("--settings-file", default=".claude/settings.local.json", help="Settings file path relative to the project dir")
+    parser.add_argument("--run-root", default=".yolo", help="Run bundle root relative to the project dir unless absolute")
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).resolve()
@@ -143,8 +170,8 @@ def main() -> int:
         return session_start(project_dir, run_root)
     if args.event == "stop":
         return stop(project_dir, run_root, hook_input)
-    if args.event == "session-end":
-        return session_end(project_dir, run_root, args.settings_file)
+    if args.event == "user-prompt-submit":
+        return user_prompt_submit(project_dir, run_root, hook_input)
     return 2
 
 

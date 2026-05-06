@@ -5,13 +5,14 @@
         "metadata": {
           "workflow": "claude-yolo-until-done",
           "hook_role": "SessionStart",
-          "run_root": "artifacts/yolo"
+          "run_root": ".yolo",
+          "hook_namespace": "claude-yolo"
         },
         "matcher": "startup|resume|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event session-start --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \"artifacts/yolo\""
+            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event session-start --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \".yolo\""
           }
         ]
       }
@@ -21,27 +22,29 @@
         "metadata": {
           "workflow": "claude-yolo-until-done",
           "hook_role": "Stop",
-          "run_root": "artifacts/yolo"
+          "run_root": ".yolo",
+          "hook_namespace": "claude-yolo"
         },
         "hooks": [
           {
             "type": "command",
-            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event stop --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \"artifacts/yolo\""
+            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event stop --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \".yolo\""
           }
         ]
       }
     ],
-    "SessionEnd": [
+    "UserPromptSubmit": [
       {
         "metadata": {
           "workflow": "claude-yolo-until-done",
-          "hook_role": "SessionEnd",
-          "run_root": "artifacts/yolo"
+          "hook_role": "UserPromptSubmit",
+          "run_root": ".yolo",
+          "hook_namespace": "claude-yolo"
         },
         "hooks": [
           {
             "type": "command",
-            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event session-end --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \"artifacts/yolo\" --settings-file \".claude/settings.local.json\""
+            "command": "\"<python>\" \"<skill-root>/workflow/claude_hook_bridge.py\" --event user-prompt-submit --project-dir \"$CLAUDE_PROJECT_DIR\" --run-root \".yolo\""
           }
         ]
       }

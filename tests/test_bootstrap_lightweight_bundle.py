@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,47 @@ BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
 
 
 class BootstrapLightweightBundleTest(unittest.TestCase):
+    def test_bootstrap_rejects_headless_claude_print_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n", encoding="utf-8")
+
+            env = dict(os.environ)
+            env["CLAUDECODE"] = "1"
+            env["CLAUDE_CODE_ENTRYPOINT"] = "print"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(BOOTSTRAP_PATH),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    str(run_root),
+                    "--goal",
+                    "Ship the lightweight run bundle.",
+                    "--success-criterion",
+                    "state.json captures the authoritative run state.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("headless claude -p", result.stderr.lower())
+            self.assertFalse((run_root / "state.json").exists())
+            self.assertFalse((run_root / "trace.md").exists())
+
     def test_bootstrap_writes_only_state_and_trace_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -64,6 +106,7 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertEqual(state["status"], "active")
             self.assertEqual(state["owner"], "worker")
             self.assertEqual(state["next_action"], "worker_update")
+            self.assertFalse(state["cleanup_required"])
             self.assertEqual(state["plan_path"], "plan.md")
             self.assertEqual(state["spec_path"], "spec.md")
             self.assertEqual(state["worker_claim"], "")

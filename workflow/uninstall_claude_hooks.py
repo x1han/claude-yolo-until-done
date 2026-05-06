@@ -12,7 +12,7 @@ from hook_settings import uninstall_hook_set
 def main() -> int:
     parser = argparse.ArgumentParser(description="Remove recommended Claude Code local hooks for claude-yolo-until-done.")
     parser.add_argument("--project-dir", required=True, help="Target Claude Code project directory")
-    parser.add_argument("--run-root", default="artifacts/yolo", help="Run bundle root relative to the project directory")
+    parser.add_argument("--run-root", default=".yolo", help="Run bundle root relative to the project directory")
     parser.add_argument("--settings-file", default=".claude/settings.local.json", help="Settings file path relative to the project directory")
     args = parser.parse_args()
 
@@ -21,7 +21,7 @@ def main() -> int:
     bridge_path = Path(__file__).resolve().parent / "claude_hook_bridge.py"
     python_exe = Path(sys.executable).resolve()
 
-    uninstall_hook_set(settings_path, python_exe, bridge_path, args.run_root, args.settings_file)
+    uninstall_hook_set(settings_path, python_exe, bridge_path, args.run_root)
     print(json.dumps({"settings_path": str(settings_path), "project_dir": str(project_dir)}, ensure_ascii=True))
     return 0
 

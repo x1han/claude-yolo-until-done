@@ -20,6 +20,7 @@ It must always contain at least:
 - `reviewed_at`
 - `owner`
 - `next_action`
+- `cleanup_required`
 - `plan_path`
 - `spec_path`
 - `updated_at`

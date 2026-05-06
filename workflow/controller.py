@@ -109,6 +109,7 @@ def update_for_complete(state: dict, args: argparse.Namespace) -> None:
     state["status"] = COMPLETE_STATUS
     state["owner"] = "watcher"
     state["next_action"] = "complete"
+    state["cleanup_required"] = True
     state["updated_at"] = timestamp
 
 

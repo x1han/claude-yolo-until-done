@@ -9,7 +9,7 @@ This workflow may run only after `superpowers` has already produced:
 - explicit execution gates
 - explicit completion criteria
 - explicit checkoff markers for stage or task progress
-- an initialized run bundle under a chosen run root, with `artifacts/yolo/` as the default example layout
+- an initialized run bundle under a chosen run root, with `.yolo/` as the default example layout
 
 This workflow is the execution backend for a superpowers-created plan. It is not allowed to replace or imitate superpowers planning inside the execution session.
 

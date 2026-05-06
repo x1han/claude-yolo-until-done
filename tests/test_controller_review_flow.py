@@ -10,6 +10,9 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
 CONTROLLER_PATH = SKILL_ROOT / "workflow" / "controller.py"
+CLEANUP_PATH = SKILL_ROOT / "workflow" / "cleanup_claude_yolo.py"
+INSTALL_HOOKS_PATH = SKILL_ROOT / "workflow" / "install_claude_hooks.py"
+RUN_GATE_PATH = SKILL_ROOT / "hooks" / "run_gate.py"
 
 
 class ControllerReviewFlowTest(unittest.TestCase):
@@ -18,7 +21,7 @@ class ControllerReviewFlowTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            run_root = project_dir / "artifacts" / "run-001"
+            run_root = project_dir / ".yolo"
 
             spec_path.write_text("# Spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n", encoding="utf-8")
@@ -232,6 +235,23 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["status"], "complete")
             self.assertEqual(state["next_action"], "complete")
             self.assertEqual(state["owner"], "watcher")
+            self.assertTrue(state["cleanup_required"])
+
+            completion = subprocess.run(
+                [
+                    sys.executable,
+                    str(RUN_GATE_PATH),
+                    "--validator",
+                    "completion",
+                    "--run-root",
+                    str(run_root),
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completion.returncode, 0, completion.stderr)
 
             trace = (run_root / "trace.md").read_text(encoding="utf-8")
             self.assertIn("worker submit", trace)
@@ -243,6 +263,30 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertIn("watcher review: approve", trace)
             self.assertIn("acceptance_basis=Completion is now gated on approved review.; Submission and rework transitions match the workflow contract.", trace)
             self.assertIn("watcher complete", trace)
+
+            cleanup = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLEANUP_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--run-root",
+                    ".yolo",
+                    "--mode",
+                    "complete",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+
+            settings = json.loads((project_dir / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+            self.assertNotIn("claudeYoloUntilDone", settings)
+            self.assertNotIn("SessionStart", settings.get("hooks", {}))
+            self.assertNotIn("Stop", settings.get("hooks", {}))
+            self.assertNotIn("UserPromptSubmit", settings.get("hooks", {}))
 
 
 if __name__ == "__main__":

@@ -57,6 +57,7 @@ def build_state(
     state["reviewed_at"] = ""
     state["owner"] = "worker"
     state["next_action"] = "worker_update"
+    state["cleanup_required"] = False
     state["plan_path"] = serialize_path(plan_path, repo_root)
     state["spec_path"] = serialize_path(spec_path, repo_root)
     state["updated_at"] = utc_now()
