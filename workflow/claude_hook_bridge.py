@@ -88,11 +88,32 @@ def is_explicit_continue_choice(hook_input: dict) -> bool:
     return prompt_text in CONTINUE_CHOICES
 
 
+def is_human_helper_mode(state: dict) -> bool:
+    return (
+        state.get("allow_need_human") is True
+        and bool(state.get("blocked_for_human"))
+        and state.get("worker_request") == "need_human"
+    )
+
+
 def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None) -> dict:
     status = state.get("status")
     cleanup_required = bool(state.get("cleanup_required"))
+    prompt_input = hook_input or {}
+
+    if is_human_helper_mode(state):
+        return {
+            "decision": "human_helper",
+            "mode": "human_helper",
+            "prompt": extract_prompt_text(prompt_input),
+            "worker_question": state.get("worker_question", ""),
+            "task_id": state.get("task_id", ""),
+            "task_title": state.get("task_title", ""),
+            "task_inputs": state.get("task_inputs", []),
+        }
+
     if status in ACTIVE_STATUSES or cleanup_required:
-        if is_explicit_continue_choice(hook_input or {}):
+        if is_explicit_continue_choice(prompt_input):
             return {}
         return {
             "decision": "block",

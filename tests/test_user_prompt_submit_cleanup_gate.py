@@ -50,6 +50,69 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
         self.assertEqual(payload["decision"], "block")
         self.assertIn("三选一", payload["reason"])
 
+    def test_user_prompt_submit_routes_need_human_runs_to_human_helper_mode(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {
+                "status": "active",
+                "cleanup_required": False,
+                "allow_need_human": True,
+                "blocked_for_human": True,
+                "worker_request": "need_human",
+                "worker_question": "Need product guidance.",
+                "task_id": "task-001",
+                "task_title": "Current task",
+                "task_inputs": ["step one", "step two"],
+            },
+            {"prompt": "我们改成只做前两步可以吗？"},
+        )
+        self.assertEqual(payload["decision"], "human_helper")
+        self.assertEqual(payload["mode"], "human_helper")
+        self.assertEqual(payload["worker_question"], "Need product guidance.")
+        self.assertEqual(payload["task_id"], "task-001")
+        self.assertEqual(payload["task_title"], "Current task")
+        self.assertEqual(payload["task_inputs"], ["step one", "step two"])
+
+    def test_user_prompt_submit_keeps_three_way_gate_without_need_human(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {
+                "status": "active",
+                "cleanup_required": False,
+                "allow_need_human": True,
+                "blocked_for_human": False,
+                "worker_request": "",
+            },
+            {"prompt": "帮我看看现在做到哪一步了"},
+        )
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("三选一", payload["reason"])
+
+    def test_user_prompt_submit_keeps_three_way_gate_when_need_human_is_disabled(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {
+                "status": "active",
+                "cleanup_required": False,
+                "allow_need_human": False,
+                "blocked_for_human": True,
+                "worker_request": "need_human",
+            },
+            {"prompt": "继续讨论一下"},
+        )
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("三选一", payload["reason"])
+
+    def test_user_prompt_submit_keeps_three_way_gate_when_allow_need_human_is_missing(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {
+                "status": "active",
+                "cleanup_required": False,
+                "blocked_for_human": True,
+                "worker_request": "need_human",
+            },
+            {"prompt": "继续讨论一下"},
+        )
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("三选一", payload["reason"])
+
     def test_user_prompt_submit_blocks_when_cleanup_is_still_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
