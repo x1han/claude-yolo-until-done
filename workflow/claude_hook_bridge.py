@@ -138,12 +138,28 @@ def emit_session_start_context(run_root: Path, state: dict | None = None, broken
     return 0
 
 
+def invalid_complete_bundle_reason(run_root: Path, state: dict) -> str | None:
+    if state.get("status") != "complete" or state.get("cleanup_required"):
+        return None
+    report = validate_completion(run_root)
+    if report.get("passed"):
+        return None
+    return (
+        f"Run root exists at {run_root} but completion validation still fails; "
+        "the durable run bundle must be repaired or cleaned up before continuing."
+    )
+
+
+
 def session_start(project_dir: Path, run_root: Path) -> int:
     state, broken_reason = load_stop_state(run_root)
     if broken_reason:
         return emit_session_start_context(run_root, broken_reason=broken_reason)
     if state is None:
         return 0
+    invalid_complete_reason = invalid_complete_bundle_reason(run_root, state)
+    if invalid_complete_reason:
+        return emit_session_start_context(run_root, broken_reason=invalid_complete_reason)
     if state.get("status") == "complete" and not state.get("cleanup_required"):
         return 0
     return emit_session_start_context(run_root, state=state)
@@ -263,6 +279,10 @@ def user_prompt_submit(project_dir: Path, run_root: Path, hook_input: dict) -> i
         return emit_block(broken_reason)
     if state is None:
         return 0
+
+    invalid_complete_reason = invalid_complete_bundle_reason(run_root, state)
+    if invalid_complete_reason:
+        return emit_block(invalid_complete_reason)
 
     payload = build_user_prompt_submit_payload(state, hook_input)
     if payload:

@@ -195,6 +195,13 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["dispatch_status"], "dispatched")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            state["worker_request"] = "need_helper"
+            state["worker_question"] = "Should helper inspect validators?"
+            state["blocked_for_human"] = True
+            state["human_handoff"] = {"reason": "stale"}
+            (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
             approve = subprocess.run(
                 [
                     sys.executable,
@@ -240,6 +247,10 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["requested_role"], "watcher")
             self.assertEqual(state["dispatch_status"], "dispatched")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
+            self.assertFalse(state["blocked_for_human"])
+            self.assertEqual(state["human_handoff"], {})
+            self.assertEqual(state["worker_request"], "")
+            self.assertEqual(state["worker_question"], "")
 
             complete = subprocess.run(
                 [
@@ -264,6 +275,12 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["next_action"], "complete")
             self.assertEqual(state["owner"], "watcher")
             self.assertTrue(state["cleanup_required"])
+            self.assertEqual(state["dispatch_status"], "idle")
+            self.assertEqual(state["last_dispatch"], {})
+            self.assertFalse(state["blocked_for_human"])
+            self.assertEqual(state["human_handoff"], {})
+            self.assertEqual(state["worker_request"], "")
+            self.assertEqual(state["worker_question"], "")
 
             completion = subprocess.run(
                 [
@@ -318,6 +335,81 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertNotIn("SessionStart", settings.get("hooks", {}))
             self.assertNotIn("Stop", settings.get("hooks", {}))
             self.assertNotIn("UserPromptSubmit", settings.get("hooks", {}))
+
+    def test_worker_submit_clears_stale_helper_and_human_routing_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+
+            spec_path.write_text("# Spec\nReview flow stays within the same task gate.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n## Tasks\n1. Preserve gate identity during rework.\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(BOOTSTRAP_PATH),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    str(run_root),
+                    "--goal",
+                    "Ship reviewed workflow state transitions.",
+                    "--success-criterion",
+                    "worker submissions move the run into watcher review.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            state["worker_request"] = "need_helper"
+            state["worker_question"] = "Should helper inspect validators?"
+            state["blocked_for_human"] = True
+            state["human_handoff"] = {"reason": "stale"}
+            (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            submit = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "worker",
+                    "--action",
+                    "submit",
+                    "--worker-claim",
+                    "Implemented review flow.",
+                    "--files-changed",
+                    "workflow/controller.py",
+                    "--verification-command",
+                    "python -m unittest tests.test_controller_review_flow",
+                    "--verification-result",
+                    "pass",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit.returncode, 0, submit.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "needs_review")
+            self.assertEqual(state["requested_role"], "watcher")
+            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["last_dispatch"]["role"], "watcher")
+            self.assertFalse(state["blocked_for_human"])
+            self.assertEqual(state["human_handoff"], {})
+            self.assertEqual(state["worker_request"], "")
+            self.assertEqual(state["worker_question"], "")
 
 
 if __name__ == "__main__":

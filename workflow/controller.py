@@ -42,6 +42,15 @@ def require(condition: bool, message: str) -> None:
         fail(message)
 
 
+def clear_transient_routing_fields(state: dict) -> None:
+    state["blocked_for_human"] = False
+    state["human_handoff"] = {}
+    state["worker_request"] = ""
+    state["worker_question"] = ""
+    state["gate_reason"] = ""
+
+
+
 def update_for_submit(state: dict, args: argparse.Namespace) -> None:
     require(args.actor == "worker", "Only the worker may submit.")
     require(state.get("status") in ALLOWED_SUBMIT_STATUSES, "Worker submit requires active or rework_required state.")
@@ -53,6 +62,7 @@ def update_for_submit(state: dict, args: argparse.Namespace) -> None:
     state["status"] = "needs_review"
     state["owner"] = "watcher"
     state["next_action"] = "watcher_review"
+    clear_transient_routing_fields(state)
     mark_dispatch_pending(state, "watcher")
     state["worker_claim"] = args.worker_claim
     state["files_changed"] = list(args.files_changed or [])
@@ -86,6 +96,7 @@ def update_for_review(state: dict, args: argparse.Namespace) -> None:
         state["status"] = APPROVED_STATUS
         state["owner"] = "watcher"
         state["next_action"] = "watcher_complete"
+        clear_transient_routing_fields(state)
         mark_dispatch_pending(state, "watcher")
         review["problems"] = []
     else:
@@ -94,6 +105,7 @@ def update_for_review(state: dict, args: argparse.Namespace) -> None:
         state["status"] = "rework_required"
         state["owner"] = "worker"
         state["next_action"] = "worker_rework"
+        clear_transient_routing_fields(state)
         mark_dispatch_pending(state, "worker")
         review["acceptance_basis"] = []
 
@@ -114,6 +126,9 @@ def update_for_complete(state: dict, args: argparse.Namespace) -> None:
     state["owner"] = "watcher"
     state["next_action"] = "complete"
     state["cleanup_required"] = True
+    clear_transient_routing_fields(state)
+    state["dispatch_status"] = "idle"
+    state["last_dispatch"] = {}
     state["updated_at"] = timestamp
 
 
@@ -146,7 +161,8 @@ def main() -> int:
         update_for_complete(state, args)
 
     write_state(run_root, state)
-    orchestrate(run_root, state)
+    if args.action != "complete":
+        orchestrate(run_root, state)
     append_trace_event(run_root, trace_line(args, state))
 
     print(

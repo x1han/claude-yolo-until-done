@@ -39,14 +39,14 @@ def main() -> int:
         if not report.get("passed"):
             print("Refusing cleanup-complete because completion validation failed.", file=sys.stderr)
             return 1
+    if args.mode in {"cancel", "complete"}:
+        remove_run_files(run_root)
     uninstall_hook_set(
         settings_path,
         Path(sys.executable).resolve(),
         Path(__file__).resolve().parent / "claude_hook_bridge.py",
         args.run_root,
     )
-    if args.mode in {"cancel", "complete"}:
-        remove_run_files(run_root)
     print(json.dumps({"mode": args.mode, "run_root": str(run_root)}))
     return 0
 

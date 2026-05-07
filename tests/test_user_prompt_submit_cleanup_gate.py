@@ -91,7 +91,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             self.assertEqual(payload["decision"], "block")
             self.assertIn("state.json is missing", payload["reason"])
 
-    def test_user_prompt_submit_emits_no_prompt_block_payload_for_complete_bundle(self) -> None:
+    def test_user_prompt_submit_blocks_invalid_complete_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
@@ -101,6 +101,13 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
                     {
                         "status": "complete",
                         "cleanup_required": False,
+                        "worker_claim": "Updated src/app.py.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {"verdict": "rework_required", "scope_checked": [], "problems": ["x"], "required_rework": ["y"], "acceptance_basis": []},
+                        "reviewed_at": "2026-05-01T00:01:00Z",
                         "owner": "watcher",
                         "next_action": "complete",
                         "requested_role": "worker",
@@ -114,9 +121,56 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
             with io.StringIO() as stream, contextlib.redirect_stdout(stream):
                 decision = user_prompt_submit(project_dir, run_root, {})
-                raw = stream.getvalue().strip()
+                payload = json.loads(stream.getvalue())
             self.assertEqual(decision, 0)
-            self.assertEqual(raw, "")
+            self.assertEqual(payload["decision"], "block")
+            self.assertIn("completion validation still fails", payload["reason"])
+
+    def test_user_prompt_submit_blocks_complete_bundle_without_cleanup_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "cleanup_required": False,
+                        "worker_claim": "Updated src/app.py.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {
+                            "verdict": "approve",
+                            "scope_checked": ["src/app.py"],
+                            "problems": [],
+                            "required_rework": [],
+                            "acceptance_basis": ["ok"],
+                        },
+                        "reviewed_at": "2026-05-01T00:01:00Z",
+                        "owner": "watcher",
+                        "next_action": "complete",
+                        "requested_role": "worker",
+                        "gate_attempt": 0,
+                        "gate_max_attempts": 5,
+                        "blocked_for_human": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated src/app.py.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+            with io.StringIO() as stream, contextlib.redirect_stdout(stream):
+                decision = user_prompt_submit(project_dir, run_root, {})
+                payload = json.loads(stream.getvalue())
+            self.assertEqual(decision, 0)
+            self.assertEqual(payload["decision"], "block")
+            self.assertIn("completion validation still fails", payload["reason"])
 
 
 if __name__ == "__main__":

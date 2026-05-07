@@ -113,6 +113,39 @@ class StopHookTest(unittest.TestCase):
             payload["hookSpecificOutput"]["additionalContext"],
         )
 
+    def test_session_start_reports_invalid_complete_bundle_via_hook_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    worker_claim="Updated src/app.py.",
+                    files_changed=["src/app.py"],
+                    verification_command="pytest -q",
+                    verification_result="passed",
+                    submitted_at="2026-05-01T00:00:00Z",
+                    review={
+                        "verdict": "rework_required",
+                        "scope_checked": [],
+                        "problems": ["x"],
+                        "required_rework": ["y"],
+                        "acceptance_basis": [],
+                    },
+                    reviewed_at="2026-05-01T00:01:00Z",
+                    owner="watcher",
+                    next_action="complete",
+                ),
+            )
+
+            decision, payload = self.capture_session_start(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertIn("hookSpecificOutput", payload)
+        self.assertIn("completion validation still fails", payload["hookSpecificOutput"]["additionalContext"])
+
     def test_stop_blocks_broken_run_root_even_with_stop_hook_active_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)

@@ -6,8 +6,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_DIR = SKILL_ROOT / "workflow"
+if str(WORKFLOW_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_DIR))
+
+from cleanup_claude_yolo import main as cleanup_main
+
 CLEANUP_PATH = SKILL_ROOT / "workflow" / "cleanup_claude_yolo.py"
 INSTALL_HOOKS_PATH = SKILL_ROOT / "workflow" / "install_claude_hooks.py"
 
@@ -205,6 +212,38 @@ class CleanupClaudeYoloTest(unittest.TestCase):
             self.assertFalse((run_root / "trace.md").exists())
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
             self.assertNotIn("claudeYoloUntilDone", settings)
+
+    def test_complete_keeps_hooks_installed_when_run_file_removal_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_valid_complete_bundle(run_root)
+
+            subprocess.run(
+                [sys.executable, str(INSTALL_HOOKS_PATH), "--project-dir", str(project_dir), "--run-root", ".yolo"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            settings_path = project_dir / ".claude" / "settings.local.json"
+            argv = [
+                "cleanup_claude_yolo.py",
+                "--project-dir",
+                str(project_dir),
+                "--run-root",
+                ".yolo",
+                "--mode",
+                "complete",
+            ]
+            with patch.object(sys, "argv", argv), patch("cleanup_claude_yolo.remove_run_files", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    cleanup_main()
+
+            self.assertTrue((run_root / "state.json").exists())
+            self.assertTrue((run_root / "trace.md").exists())
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertIn("claudeYoloUntilDone", settings)
 
 
 if __name__ == "__main__":
