@@ -54,11 +54,15 @@ class ChecklistBootstrapTest(unittest.TestCase):
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
             checklist = json.loads((run_root / "watcher_checklist.json").read_text(encoding="utf-8"))
             first_task = checklist["tasks"][0]
+            second_task = checklist["tasks"][1]
 
+            self.assertEqual(len(checklist["tasks"]), 2)
             self.assertEqual(state["task_title"], first_task["task_title"])
             self.assertEqual(state["task_inputs"], first_task)
             self.assertEqual(state["task_inputs"]["task_title"], "Tighten stop hook")
             self.assertEqual(state["task_inputs"]["plan_task_text"], "### Task 1: Tighten stop hook")
+            self.assertEqual(second_task["task_title"], "Add orchestrator routing")
+            self.assertEqual(second_task["plan_task_text"], "### Task 2: Add orchestrator routing")
             self.assertIn("Stop blocks unfinished runs", state["task_inputs"]["spec_excerpt"])
 
     def test_bootstrap_numbered_fallback_uses_task_section_not_earlier_overview_list(self) -> None:
@@ -326,14 +330,17 @@ class PreflightTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("watcher_checklist.json", result.stderr)
 
-    def test_preflight_rejects_continue_run_when_checklist_first_task_mismatches_state(self) -> None:
+    def test_preflight_validates_continue_run_against_current_checklist_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
             spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
 
             bootstrap = subprocess.run(
                 [
@@ -359,8 +366,13 @@ class PreflightTest(unittest.TestCase):
 
             checklist_path = run_root / "watcher_checklist.json"
             checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
-            checklist["tasks"][0]["task_title"] = "Different first task"
-            checklist_path.write_text(json.dumps(checklist, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+            second_task = checklist["tasks"][1]
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["task_id"] = second_task["task_id"]
+            state["task_title"] = second_task["task_title"]
+            state["task_inputs"] = second_task
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
             env = dict(os.environ)
             env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
@@ -390,9 +402,10 @@ class PreflightTest(unittest.TestCase):
                 env=env,
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("task_inputs", result.stderr)
-            self.assertIn("watcher_checklist.json", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "continue_run")
+            self.assertEqual(payload["action"], "validated_and_installed")
 
     def test_preflight_rejects_continue_run_when_spec_path_mismatches_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

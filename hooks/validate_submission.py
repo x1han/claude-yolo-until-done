@@ -24,6 +24,13 @@ def run(run_root):
     add_check(report, "submitted_at_present", bool(str(state.get("submitted_at", "")).strip()), f"submitted_at={state.get('submitted_at')}")
     add_check(report, "review_is_empty", state.get("review") == {}, f"review={state.get('review')}")
     add_check(report, "reviewed_at_is_empty", not str(state.get("reviewed_at", "")).strip(), f"reviewed_at={state.get('reviewed_at')}")
+    add_check(
+        report,
+        "dispatch_matches_review_target",
+        state.get("dispatch_status") != "dispatched"
+        or (state.get("last_dispatch") or {}).get("role") == "watcher",
+        f"dispatch_status={state.get('dispatch_status')} last_dispatch={state.get('last_dispatch')}",
+    )
     add_check(report, "trace_exists", trace_exists, f"trace_path={trace_path(run_root)}")
     add_check(report, "trace_mentions_worker_submit", "worker submit:" in trace_body, f"trace_path={trace_path(run_root)}")
     return report

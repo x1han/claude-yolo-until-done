@@ -17,7 +17,7 @@ from validate_completion import run as validate_completion
 
 
 ACTIVE_STATUSES = {"active", "needs_review", "rework_required", "approved"}
-CONTINUE_TOKENS = ("继续 yolo", "continue yolo")
+CONTINUE_CHOICES = {"继续 yolo", "continue yolo"}
 PROMPT_FIELDS = ("prompt", "text", "userPrompt")
 
 
@@ -50,7 +50,7 @@ def validate_stop_state(state: dict, run_root: Path) -> str | None:
         if field not in state:
             return (
                 f"Run root exists at {run_root} but state.json is missing required field {field!r}; "
-                "stop stays blocked until the durable run bundle is repaired."
+                "the durable run bundle must be repaired before continuing."
             )
     try:
         gate_attempt = int(state["gate_attempt"])
@@ -58,12 +58,12 @@ def validate_stop_state(state: dict, run_root: Path) -> str | None:
     except (TypeError, ValueError):
         return (
             f"Run root exists at {run_root} but gate counters are unreadable; "
-            "stop stays blocked until the durable run bundle is repaired."
+            "the durable run bundle must be repaired before continuing."
         )
     if gate_attempt < 0 or gate_max_attempts <= 0:
         return (
             f"Run root exists at {run_root} but gate counters are invalid; "
-            "stop stays blocked until the durable run bundle is repaired."
+            "the durable run bundle must be repaired before continuing."
         )
     return None
 
@@ -85,7 +85,7 @@ def extract_prompt_text(hook_input: dict) -> str:
 
 def is_explicit_continue_choice(hook_input: dict) -> bool:
     prompt_text = extract_prompt_text(hook_input).lower()
-    return any(token in prompt_text for token in CONTINUE_TOKENS)
+    return prompt_text in CONTINUE_CHOICES
 
 
 def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None) -> dict:
@@ -106,26 +106,28 @@ def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None
     return {}
 
 
-def session_start(project_dir: Path, run_root: Path) -> int:
-    state_path = run_root / "state.json"
-    if not state_path.exists():
-        return 0
-
-    state = load_json(state_path)
-    if state.get("status") == "complete" and not state.get("cleanup_required"):
-        return 0
-
-    additional_context = "\n".join(
-        [
-            "A lightweight worker-watcher workflow is active for this project.",
-            f"Run bundle: {run_root}",
-            f"Status: {state.get('status')}",
-            f"Owner: {state.get('owner')}",
-            f"Goal: {state.get('goal')}",
-            f"Next action: {state.get('next_action')}",
-            "Reload state.json and continue from the durable state on disk.",
-        ]
-    )
+def emit_session_start_context(run_root: Path, state: dict | None = None, broken_reason: str | None = None) -> int:
+    if broken_reason:
+        additional_context = "\n".join(
+            [
+                "A lightweight worker-watcher workflow bundle is mounted for this project but needs repair before resume.",
+                f"Run bundle: {run_root}",
+                f"Issue: {broken_reason}",
+                "Repair or clean up the durable run bundle before continuing.",
+            ]
+        )
+    else:
+        additional_context = "\n".join(
+            [
+                "A lightweight worker-watcher workflow is active for this project.",
+                f"Run bundle: {run_root}",
+                f"Status: {state.get('status')}",
+                f"Owner: {state.get('owner')}",
+                f"Goal: {state.get('goal')}",
+                f"Next action: {state.get('next_action')}",
+                "Reload state.json and continue from the durable state on disk.",
+            ]
+        )
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
@@ -134,6 +136,17 @@ def session_start(project_dir: Path, run_root: Path) -> int:
     }
     print(json.dumps(payload, ensure_ascii=True))
     return 0
+
+
+def session_start(project_dir: Path, run_root: Path) -> int:
+    state, broken_reason = load_stop_state(run_root)
+    if broken_reason:
+        return emit_session_start_context(run_root, broken_reason=broken_reason)
+    if state is None:
+        return 0
+    if state.get("status") == "complete" and not state.get("cleanup_required"):
+        return 0
+    return emit_session_start_context(run_root, state=state)
 
 
 def emit_block(reason: str, orchestration: dict | None = None) -> int:
@@ -148,19 +161,19 @@ def load_stop_state(run_root: Path) -> tuple[dict | None, str | None]:
     if not run_root.exists():
         return None, None
     if not run_root.is_dir():
-        return None, f"Run root exists at {run_root} but is not a directory; stop stays blocked until the run bundle is repaired or removed."
+        return None, f"Run root exists at {run_root} but is not a directory; the run bundle must be repaired or removed before continuing."
 
     state_path = run_root / "state.json"
     trace_path = run_root / "trace.md"
     if not state_path.exists():
-        return None, f"Run root exists at {run_root} but state.json is missing; stop stays blocked until the durable run bundle is repaired or cleaned up."
+        return None, f"Run root exists at {run_root} but state.json is missing; the durable run bundle must be repaired or cleaned up before continuing."
     if not trace_path.exists():
-        return None, f"Run root exists at {run_root} but trace.md is missing; stop stays blocked until the durable run bundle is repaired or cleaned up."
+        return None, f"Run root exists at {run_root} but trace.md is missing; the durable run bundle must be repaired or cleaned up before continuing."
 
     try:
         state = load_json(state_path)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None, f"Run root exists at {run_root} but state.json is unreadable; stop stays blocked until the durable run bundle is repaired."
+        return None, f"Run root exists at {run_root} but state.json is unreadable; the durable run bundle must be repaired before continuing."
 
     invalid_reason = validate_stop_state(state, run_root)
     if invalid_reason:
@@ -229,7 +242,6 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
                 )
             else:
                 reason = f"{reason} Worker return stop gate attempt {attempts}/{max_attempts}."
-            state = load_json(run_root / "state.json")
         orchestration = orchestrate(run_root, state)
         return emit_block(reason, orchestration)
 
@@ -246,11 +258,13 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
 
 
 def user_prompt_submit(project_dir: Path, run_root: Path, hook_input: dict) -> int:
-    state_path = run_root / "state.json"
-    if not state_path.exists():
+    state, broken_reason = load_stop_state(run_root)
+    if broken_reason:
+        return emit_block(broken_reason)
+    if state is None:
         return 0
 
-    payload = build_user_prompt_submit_payload(load_json(state_path), hook_input)
+    payload = build_user_prompt_submit_payload(state, hook_input)
     if payload:
         print(json.dumps(payload, ensure_ascii=False))
     return 0

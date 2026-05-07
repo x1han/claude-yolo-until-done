@@ -8,6 +8,12 @@ from pathlib import Path
 
 from hook_settings import uninstall_hook_set
 
+HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
+if str(HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(HOOKS_DIR))
+
+from validate_completion import run as validate_completion
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Clean up claude-yolo runtime state.")
@@ -28,6 +34,11 @@ def main() -> int:
     project_dir = Path(args.project_dir).resolve()
     run_root = (project_dir / args.run_root).resolve()
     settings_path = (project_dir / args.settings_file).resolve()
+    if args.mode == "complete":
+        report = validate_completion(run_root)
+        if not report.get("passed"):
+            print("Refusing cleanup-complete because completion validation failed.", file=sys.stderr)
+            return 1
     uninstall_hook_set(
         settings_path,
         Path(sys.executable).resolve(),

@@ -38,9 +38,17 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
     def test_user_prompt_submit_allows_explicit_continue_choice(self) -> None:
         payload = build_user_prompt_submit_payload(
             {"status": "rework_required", "cleanup_required": False},
-            {"prompt": "继续 yolo。读取 .yolo/state.json 并执行前 3 步。"},
+            {"prompt": "继续 yolo"},
         )
         self.assertEqual(payload, {})
+
+    def test_user_prompt_submit_blocks_non_exact_continue_phrase(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {"status": "rework_required", "cleanup_required": False},
+            {"prompt": "继续 yolo。读取 .yolo/state.json 并执行前 3 步。"},
+        )
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("三选一", payload["reason"])
 
     def test_user_prompt_submit_blocks_when_cleanup_is_still_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -48,15 +56,67 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             run_root = project_dir / ".yolo"
             run_root.mkdir(parents=True)
             (run_root / "state.json").write_text(
-                json.dumps({"status": "complete", "cleanup_required": True}),
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "cleanup_required": True,
+                        "owner": "watcher",
+                        "next_action": "cleanup",
+                        "requested_role": "worker",
+                        "gate_attempt": 0,
+                        "gate_max_attempts": 5,
+                        "blocked_for_human": False,
+                    }
+                ),
                 encoding="utf-8",
             )
+            (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
             with io.StringIO() as stream, contextlib.redirect_stdout(stream):
                 decision = user_prompt_submit(project_dir, run_root, {})
                 payload = json.loads(stream.getvalue())
             self.assertEqual(decision, 0)
             self.assertEqual(payload["decision"], "block")
             self.assertIn("继续 yolo", payload["reason"])
+
+    def test_user_prompt_submit_blocks_when_run_bundle_is_damaged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True)
+            (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
+            with io.StringIO() as stream, contextlib.redirect_stdout(stream):
+                decision = user_prompt_submit(project_dir, run_root, {})
+                payload = json.loads(stream.getvalue())
+            self.assertEqual(decision, 0)
+            self.assertEqual(payload["decision"], "block")
+            self.assertIn("state.json is missing", payload["reason"])
+
+    def test_user_prompt_submit_emits_no_prompt_block_payload_for_complete_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "cleanup_required": False,
+                        "owner": "watcher",
+                        "next_action": "complete",
+                        "requested_role": "worker",
+                        "gate_attempt": 0,
+                        "gate_max_attempts": 5,
+                        "blocked_for_human": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
+            with io.StringIO() as stream, contextlib.redirect_stdout(stream):
+                decision = user_prompt_submit(project_dir, run_root, {})
+                raw = stream.getvalue().strip()
+            self.assertEqual(decision, 0)
+            self.assertEqual(raw, "")
 
 
 if __name__ == "__main__":

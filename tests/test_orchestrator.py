@@ -159,6 +159,38 @@ class OrchestratorRoutingTest(unittest.TestCase):
         self.assertEqual(packet["gate_attempt"], 1)
         self.assertEqual(packet["task_handoff_notes"], ["watcher requested tighter stop semantics"])
 
+    def test_build_task_packet_preserves_handoff_context(self) -> None:
+        state = {
+            "task_id": "task-002",
+            "task_title": "Second",
+            "task_goal": "Repair it",
+            "task_scope": ["workflow/orchestrator.py"],
+            "task_inputs": {
+                "task_id": "task-002",
+                "task_title": "Second",
+                "plan_task_text": "2. Second",
+                "spec_excerpt": "spec",
+                "checklist_items": ["a"],
+            },
+            "task_handoff_notes": ["Need reviewer guidance"],
+            "worker_request": "need_helper",
+            "worker_question": "Should helper inspect validators?",
+            "human_handoff": {"reason": "stop_gate_limit"},
+            "gate_id": "gate-task-002",
+            "gate_attempt": 2,
+            "gate_max_attempts": 5,
+            "gate_reason": "worker_return_stop_block",
+            "verification_command": "python -m unittest -v",
+            "verification_result": "passed",
+        }
+
+        packet = build_task_packet(state, "helper")
+
+        self.assertEqual(packet["worker_request"], "need_helper")
+        self.assertEqual(packet["worker_question"], "Should helper inspect validators?")
+        self.assertEqual(packet["human_handoff"], {"reason": "stop_gate_limit"})
+        self.assertEqual(packet["task_handoff_notes"], ["Need reviewer guidance"])
+
     def test_resume_after_human_creates_new_task_and_gate_and_clears_human_block(self) -> None:
         state = {
             "task_id": "task-001",
@@ -215,6 +247,103 @@ class OrchestratorRoutingTest(unittest.TestCase):
                 "Focus only on orchestrator resume state.",
             ],
         )
+
+    def test_resume_after_human_advances_to_next_checklist_task_when_available(self) -> None:
+        task_one = {
+            "task_id": "task-001",
+            "task_title": "Keep the run bundle consistent",
+            "plan_task_text": "### Task 1: Keep the run bundle consistent",
+            "spec_excerpt": "Stop blocks unfinished runs.",
+            "checklist_items": ["match scope"],
+        }
+        task_two = {
+            "task_id": "task-002",
+            "task_title": "Advance the durable task state",
+            "plan_task_text": "### Task 2: Advance the durable task state",
+            "spec_excerpt": "Stop blocks unfinished runs.",
+            "checklist_items": ["require fresh verification"],
+        }
+        state = {
+            "task_id": "task-001",
+            "task_title": task_one["task_title"],
+            "task_inputs": task_one,
+            "gate_id": "gate-task-001",
+            "gate_attempt": 1,
+            "blocked_for_human": True,
+            "human_handoff": {"question": "Need direction"},
+            "requested_role": "human",
+            "task_handoff_notes": [],
+        }
+
+        resumed = resume_after_human(state, "Proceed to the next approved task.", checklist={"tasks": [task_one, task_two]})
+
+        self.assertEqual(resumed["task_id"], "task-002")
+        self.assertEqual(resumed["gate_id"], "gate-task-002")
+        self.assertEqual(resumed["task_title"], task_two["task_title"])
+        self.assertEqual(resumed["task_inputs"], task_two)
+        self.assertEqual(resumed["task_handoff_notes"], ["Proceed to the next approved task."])
+
+    def test_resume_after_human_keeps_current_task_when_checklist_has_no_next_task(self) -> None:
+        task_one = {
+            "task_id": "task-001",
+            "task_title": "Keep the run bundle consistent",
+            "plan_task_text": "### Task 1: Keep the run bundle consistent",
+            "spec_excerpt": "Stop blocks unfinished runs.",
+            "checklist_items": ["match scope"],
+        }
+        state = {
+            "task_id": "task-001",
+            "task_title": task_one["task_title"],
+            "task_inputs": task_one,
+            "gate_id": "gate-task-001",
+            "gate_attempt": 1,
+            "blocked_for_human": True,
+            "human_handoff": {"question": "Need direction"},
+            "requested_role": "human",
+            "task_handoff_notes": [],
+        }
+
+        resumed = resume_after_human(state, "Retry the current task with narrower scope.", checklist={"tasks": [task_one]})
+
+        self.assertEqual(resumed["task_id"], "task-001")
+        self.assertEqual(resumed["gate_id"], "gate-task-001")
+        self.assertEqual(resumed["task_title"], task_one["task_title"])
+        self.assertEqual(resumed["task_inputs"], task_one)
+        self.assertEqual(resumed["task_handoff_notes"], ["Retry the current task with narrower scope."])
+
+    def test_resume_after_human_uses_checklist_order_not_task_id_math(self) -> None:
+        task_one = {
+            "task_id": "task-001",
+            "task_title": "Keep the run bundle consistent",
+            "plan_task_text": "### Task 1: Keep the run bundle consistent",
+            "spec_excerpt": "Stop blocks unfinished runs.",
+            "checklist_items": ["match scope"],
+        }
+        task_two = {
+            "task_id": "task-010",
+            "task_title": "Advance the durable task state",
+            "plan_task_text": "### Task 10: Advance the durable task state",
+            "spec_excerpt": "Stop blocks unfinished runs.",
+            "checklist_items": ["require fresh verification"],
+        }
+        state = {
+            "task_id": "task-001",
+            "task_title": task_one["task_title"],
+            "task_inputs": task_one,
+            "gate_id": "gate-task-001",
+            "gate_attempt": 1,
+            "blocked_for_human": True,
+            "human_handoff": {"question": "Need direction"},
+            "requested_role": "human",
+            "task_handoff_notes": [],
+        }
+
+        resumed = resume_after_human(state, "Proceed to the next approved task.", checklist={"tasks": [task_one, task_two]})
+
+        self.assertEqual(resumed["task_id"], "task-010")
+        self.assertEqual(resumed["gate_id"], "gate-task-010")
+        self.assertEqual(resumed["task_title"], task_two["task_title"])
+        self.assertEqual(resumed["task_inputs"], task_two)
 
     def test_mark_dispatch_pending_resets_dispatch_fields(self) -> None:
         state = {"requested_role": "worker", "dispatch_status": "dispatched", "last_dispatch": {"role": "worker"}}

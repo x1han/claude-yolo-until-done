@@ -65,12 +65,18 @@ def classify_run(run_root: Path) -> str:
     raise SystemExit("Mixed run bundle state detected; state.json and trace.md must either both exist or both be absent.")
 
 
-def load_first_checklist_task(checklist_path: Path) -> dict:
+def load_current_checklist_task(checklist_path: Path, state: dict) -> dict:
     checklist = load_json(checklist_path)
     tasks = checklist.get("tasks")
-    if not isinstance(tasks, list) or not tasks or not isinstance(tasks[0], dict):
+    if not isinstance(tasks, list) or not tasks:
         raise SystemExit(f"Invalid checklist artifact: {checklist_path}")
-    return tasks[0]
+
+    current_task_id = state.get("task_id")
+    for task in tasks:
+        if isinstance(task, dict) and task.get("task_id") == current_task_id:
+            return task
+
+    raise SystemExit(f"Continue-run mismatch: could not find current task {current_task_id!r} in {checklist_path}")
 
 
 def validate_continue_run_paths(state: dict, project_dir: Path, spec_path: Path, plan_path: Path) -> None:
@@ -151,10 +157,14 @@ def main() -> int:
 
     state = load_state(run_root)
     validate_continue_run_paths(state, project_dir, spec_path, plan_path)
-    first_checklist_task = load_first_checklist_task(checklist_path)
-    if state.get("task_inputs") != first_checklist_task:
+    current_checklist_task = load_current_checklist_task(checklist_path, state)
+    if state.get("task_title") != current_checklist_task.get("task_title"):
         raise SystemExit(
-            f"Continue-run mismatch: state task_inputs do not match first task in {checklist_path}"
+            f"Continue-run mismatch: state task_title does not match current task in {checklist_path}"
+        )
+    if state.get("task_inputs") != current_checklist_task:
+        raise SystemExit(
+            f"Continue-run mismatch: state task_inputs do not match current task in {checklist_path}"
         )
     install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
     payload = {

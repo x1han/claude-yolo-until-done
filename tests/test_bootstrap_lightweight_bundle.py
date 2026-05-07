@@ -54,7 +54,7 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertFalse((run_root / "state.json").exists())
             self.assertFalse((run_root / "trace.md").exists())
 
-    def test_bootstrap_writes_only_state_and_trace_bundle(self) -> None:
+    def test_bootstrap_writes_lightweight_run_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -62,7 +62,7 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             run_root = project_dir / "artifacts" / "run-001"
 
             spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Ship the lightweight run bundle\n", encoding="utf-8")
 
             result = subprocess.run(
                 [
@@ -91,8 +91,10 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
 
             state_path = run_root / "state.json"
             trace_path = run_root / "trace.md"
+            checklist_path = run_root / "watcher_checklist.json"
             self.assertTrue(state_path.exists())
             self.assertTrue(trace_path.exists())
+            self.assertTrue(checklist_path.exists())
 
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["goal"], "Ship the lightweight run bundle.")
@@ -109,6 +111,9 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertFalse(state["cleanup_required"])
             self.assertEqual(state["plan_path"], "plan.md")
             self.assertEqual(state["spec_path"], "spec.md")
+            self.assertEqual(state["task_id"], "task-001")
+            self.assertEqual(state["task_title"], "Ship the lightweight run bundle")
+            self.assertEqual(state["task_inputs"]["task_id"], "task-001")
             self.assertEqual(state["worker_claim"], "")
             self.assertEqual(state["files_changed"], [])
             self.assertEqual(state["verification_command"], "")
@@ -117,6 +122,10 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertEqual(state["review"], {})
             self.assertEqual(state["reviewed_at"], "")
             self.assertIn("updated_at", state)
+
+            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(checklist["tasks"]), 1)
+            self.assertEqual(checklist["tasks"][0]["task_title"], "Ship the lightweight run bundle")
 
             trace = trace_path.read_text(encoding="utf-8")
             self.assertIn("# Goal", trace)

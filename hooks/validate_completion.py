@@ -23,8 +23,15 @@ def run(run_root):
     add_check(report, "verification_command_present", bool(str(state.get("verification_command", "")).strip()), f"verification_command={state.get('verification_command')}")
     add_check(report, "verification_result_present", bool(str(state.get("verification_result", "")).strip()), f"verification_result={state.get('verification_result')}")
     add_check(report, "submitted_at_present", bool(str(state.get("submitted_at", "")).strip()), f"submitted_at={state.get('submitted_at')}")
+    add_check(report, "cleanup_required_true", state.get("cleanup_required") is True, f"cleanup_required={state.get('cleanup_required')}")
     add_check(report, "review_verdict_is_approve", review.get("verdict") == "approve", f"verdict={review.get('verdict')}")
     add_check(report, "scope_checked_present", bool(review.get("scope_checked")), f"scope_checked={review.get('scope_checked')}")
+    add_check(
+        report,
+        "scope_checked_covers_files_changed",
+        set(review.get("scope_checked") or []).issuperset(set(state.get("files_changed") or [])),
+        f"scope_checked={review.get('scope_checked')} files_changed={state.get('files_changed')}",
+    )
     add_check(report, "acceptance_basis_present", bool(review.get("acceptance_basis")), f"acceptance_basis={review.get('acceptance_basis')}")
     add_check(report, "required_rework_empty", not review.get("required_rework"), f"required_rework={review.get('required_rework')}")
     add_check(report, "reviewed_at_present", bool(str(state.get("reviewed_at", "")).strip()), f"reviewed_at={state.get('reviewed_at')}")

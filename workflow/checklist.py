@@ -12,14 +12,18 @@ _TASK_SECTION_PATTERN = re.compile(
 )
 
 
-def extract_first_task(plan_path: Path) -> tuple[str, str]:
+def extract_plan_tasks(plan_path: Path) -> list[tuple[str, str]]:
     lines = plan_path.read_text(encoding="utf-8").splitlines()
+    heading_tasks: list[tuple[str, str]] = []
     for line in lines:
         stripped = line.strip()
         heading_match = _TASK_HEADING_PATTERN.match(stripped)
         if heading_match:
-            return stripped, heading_match.group(1)
+            heading_tasks.append((stripped, heading_match.group(1)))
+    if heading_tasks:
+        return heading_tasks
 
+    section_tasks: list[tuple[str, str]] = []
     in_task_section = False
     for line in lines:
         stripped = line.strip()
@@ -33,21 +37,23 @@ def extract_first_task(plan_path: Path) -> tuple[str, str]:
             continue
         line_match = _TASK_LINE_PATTERN.match(stripped)
         if line_match:
-            return stripped, line_match.group(2)
+            section_tasks.append((stripped, line_match.group(2)))
+    if section_tasks:
+        return section_tasks
 
-    raise SystemExit(f"Could not extract first task from plan: {plan_path}")
+    raise SystemExit(f"Could not extract any tasks from plan: {plan_path}")
 
 
 def build_master_checklist(spec_path: Path, plan_path: Path) -> dict:
     spec_excerpt = spec_path.read_text(encoding="utf-8").strip()
-    first_task_line, task_title = extract_first_task(plan_path)
+    plan_tasks = extract_plan_tasks(plan_path)
 
     return {
         "tasks": [
             {
-                "task_id": "task-001",
+                "task_id": f"task-{index:03d}",
                 "task_title": task_title,
-                "plan_task_text": first_task_line,
+                "plan_task_text": plan_task_text,
                 "spec_excerpt": spec_excerpt,
                 "checklist_items": [
                     "match scope",
@@ -55,5 +61,6 @@ def build_master_checklist(spec_path: Path, plan_path: Path) -> dict:
                     "reject drift",
                 ],
             }
+            for index, (plan_task_text, task_title) in enumerate(plan_tasks, start=1)
         ]
     }

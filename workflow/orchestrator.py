@@ -9,21 +9,26 @@ DISPATCHED_STATUS = "dispatched"
 IDLE_STATUS = "idle"
 
 
-def _increment_task_id(task_id: str) -> str:
-    prefix, number = task_id.rsplit("-", 1)
-    return f"{prefix}-{int(number) + 1:03d}"
+def _find_next_checklist_task(checklist: dict | None, current_task_id: str) -> dict | None:
+    tasks = checklist.get("tasks", []) if isinstance(checklist, dict) else []
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict) or task.get("task_id") != current_task_id:
+            continue
+        next_index = index + 1
+        if next_index >= len(tasks) or not isinstance(tasks[next_index], dict):
+            return None
+        return tasks[next_index]
+    return None
 
 
-def resume_after_human(state: dict, guidance: str) -> dict:
-    next_task_id = _increment_task_id(state["task_id"])
+def resume_after_human(state: dict, guidance: str, checklist: dict | None = None) -> dict:
+    current_task_id = state["task_id"]
     notes = list(state.get("task_handoff_notes", []))
     notes.append(guidance)
 
     resumed = dict(state)
     resumed.update(
         {
-            "task_id": next_task_id,
-            "gate_id": f"gate-{next_task_id}",
             "gate_attempt": 0,
             "gate_reason": "",
             "owner": "worker",
@@ -40,6 +45,21 @@ def resume_after_human(state: dict, guidance: str) -> dict:
             "task_handoff_notes": notes,
         }
     )
+    next_task = _find_next_checklist_task(checklist, current_task_id)
+    if next_task is not None:
+        next_task_id = next_task["task_id"]
+        resumed["task_id"] = next_task_id
+        resumed["gate_id"] = f"gate-{next_task_id}"
+        resumed["task_title"] = next_task.get("task_title", resumed.get("task_title", ""))
+        resumed["task_inputs"] = dict(next_task)
+        return resumed
+
+    if checklist is None:
+        prefix, number = current_task_id.rsplit("-", 1)
+        next_task_id = f"{prefix}-{int(number) + 1:03d}"
+        resumed["task_id"] = next_task_id
+        resumed["gate_id"] = f"gate-{next_task_id}"
+
     return resumed
 
 
@@ -54,11 +74,15 @@ def build_task_packet(state: dict, role: str) -> dict:
         "plan_task_text": inputs.get("plan_task_text", ""),
         "spec_excerpt": inputs.get("spec_excerpt", ""),
         "checklist_items": list(inputs.get("checklist_items", [])),
+        "task_inputs": inputs,
+        "task_handoff_notes": list(state.get("task_handoff_notes", [])),
+        "worker_request": state.get("worker_request", ""),
+        "worker_question": state.get("worker_question", ""),
+        "human_handoff": dict(state.get("human_handoff", {})),
         "gate_id": state["gate_id"],
         "gate_attempt": state["gate_attempt"],
         "gate_max_attempts": state["gate_max_attempts"],
         "gate_reason": state.get("gate_reason", ""),
-        "task_handoff_notes": list(state.get("task_handoff_notes", [])),
         "verification_command": state.get("verification_command", ""),
         "verification_result": state.get("verification_result", ""),
     }

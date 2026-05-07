@@ -13,7 +13,7 @@ WORKFLOW_DIR = SKILL_ROOT / "workflow"
 if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
-from claude_hook_bridge import stop
+from claude_hook_bridge import session_start, stop
 
 
 class StopHookTest(unittest.TestCase):
@@ -69,6 +69,12 @@ class StopHookTest(unittest.TestCase):
             raw = stream.getvalue().strip()
         return decision, json.loads(raw) if raw else None
 
+    def capture_session_start(self, project_dir: Path, run_root: Path) -> tuple[int, dict | None]:
+        with io.StringIO() as stream, contextlib.redirect_stdout(stream):
+            decision = session_start(project_dir, run_root)
+            raw = stream.getvalue().strip()
+        return decision, json.loads(raw) if raw else None
+
     def test_stop_allows_when_no_run_root_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -76,6 +82,36 @@ class StopHookTest(unittest.TestCase):
 
         self.assertEqual(decision, 0)
         self.assertIsNone(payload)
+
+    def test_session_start_reports_missing_trace_via_hook_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(run_root, write_trace_file=False)
+
+            decision, payload = self.capture_session_start(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertIn("hookSpecificOutput", payload)
+        self.assertEqual(payload["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertIn("trace.md is missing", payload["hookSpecificOutput"]["additionalContext"])
+
+    def test_session_start_reports_missing_required_fields_via_hook_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            broken_state = self.make_state()
+            broken_state.pop("requested_role")
+            self.write_run_bundle(run_root, state=broken_state)
+
+            decision, payload = self.capture_session_start(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertIn("hookSpecificOutput", payload)
+        self.assertIn(
+            "missing required field 'requested_role'",
+            payload["hookSpecificOutput"]["additionalContext"],
+        )
 
     def test_stop_blocks_broken_run_root_even_with_stop_hook_active_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
