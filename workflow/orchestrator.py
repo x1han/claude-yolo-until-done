@@ -9,20 +9,7 @@ DISPATCHED_STATUS = "dispatched"
 IDLE_STATUS = "idle"
 
 
-def _find_next_checklist_task(checklist: dict | None, current_task_id: str) -> dict | None:
-    tasks = checklist.get("tasks", []) if isinstance(checklist, dict) else []
-    for index, task in enumerate(tasks):
-        if not isinstance(task, dict) or task.get("task_id") != current_task_id:
-            continue
-        next_index = index + 1
-        if next_index >= len(tasks) or not isinstance(tasks[next_index], dict):
-            return None
-        return tasks[next_index]
-    return None
-
-
-def resume_after_human(state: dict, guidance: str, checklist: dict | None = None) -> dict:
-    current_task_id = state["task_id"]
+def resume_after_human(state: dict, guidance: str) -> dict:
     notes = list(state.get("task_handoff_notes", []))
     notes.append(guidance)
 
@@ -45,21 +32,6 @@ def resume_after_human(state: dict, guidance: str, checklist: dict | None = None
             "task_handoff_notes": notes,
         }
     )
-    next_task = _find_next_checklist_task(checklist, current_task_id)
-    if next_task is not None:
-        next_task_id = next_task["task_id"]
-        resumed["task_id"] = next_task_id
-        resumed["gate_id"] = f"gate-{next_task_id}"
-        resumed["task_title"] = next_task.get("task_title", resumed.get("task_title", ""))
-        resumed["task_inputs"] = dict(next_task)
-        return resumed
-
-    if checklist is None:
-        prefix, number = current_task_id.rsplit("-", 1)
-        next_task_id = f"{prefix}-{int(number) + 1:03d}"
-        resumed["task_id"] = next_task_id
-        resumed["gate_id"] = f"gate-{next_task_id}"
-
     return resumed
 
 

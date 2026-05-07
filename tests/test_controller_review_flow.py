@@ -8,6 +8,12 @@ import unittest
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_DIR = SKILL_ROOT / "workflow"
+if str(WORKFLOW_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_DIR))
+
+from controller import update_for_helper_request
+
 BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
 CONTROLLER_PATH = SKILL_ROOT / "workflow" / "controller.py"
 CLEANUP_PATH = SKILL_ROOT / "workflow" / "cleanup_claude_yolo.py"
@@ -16,6 +22,26 @@ RUN_GATE_PATH = SKILL_ROOT / "hooks" / "run_gate.py"
 
 
 class ControllerReviewFlowTest(unittest.TestCase):
+    def test_update_for_helper_request_rejects_need_human_when_disabled(self) -> None:
+        state = {
+            "allow_need_human": False,
+            "owner": "worker",
+            "next_action": "worker_update",
+            "requested_role": "worker",
+            "dispatch_status": "idle",
+            "last_dispatch": {},
+            "blocked_for_human": False,
+            "worker_request": "",
+            "worker_question": "",
+        }
+
+        with self.assertRaisesRegex(SystemExit, "forbids need_human"):
+            update_for_helper_request(state, "need_human", "Need product guidance.")
+
+        self.assertFalse(state["blocked_for_human"])
+        self.assertEqual(state["worker_request"], "")
+        self.assertEqual(state["worker_question"], "")
+
     def test_worker_submit_then_watcher_reject_approve_and_complete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
