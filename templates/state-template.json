@@ -12,6 +12,13 @@
   "owner": "worker",
   "next_action": "worker_update",
   "cleanup_required": false,
+  "task_id": "task-001",
+  "gate_id": "gate-task-001",
+  "gate_attempt": 0,
+  "gate_max_attempts": 5,
+  "requested_role": "worker",
+  "dispatch_status": "idle",
+  "blocked_for_human": false,
   "plan_path": "plans/implementation-plan.md",
   "spec_path": "specs/approved-spec.md",
   "updated_at": ""

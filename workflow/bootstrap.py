@@ -6,7 +6,8 @@ import json
 import os
 from pathlib import Path
 
-from state import build_state, build_trace
+from checklist import build_master_checklist
+from state import build_state, build_trace, write_json, write_text
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -46,6 +47,10 @@ def bootstrap_run(
         spec_path=spec_path,
         repo_root=repo_root,
     )
+    checklist = build_master_checklist(spec_path, plan_path)
+    first_task = checklist["tasks"][0]
+    state["task_title"] = first_task["task_title"]
+    state["task_inputs"] = dict(first_task)
     trace = build_trace(
         TEMPLATES_DIR / "trace-template.md",
         goal=goal,
@@ -54,14 +59,16 @@ def bootstrap_run(
 
     state_path = resolved_run_root / "state.json"
     trace_path = resolved_run_root / "trace.md"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-    trace_path.write_text(trace, encoding="utf-8")
+    checklist_path = resolved_run_root / "watcher_checklist.json"
+    write_json(state_path, state)
+    write_text(trace_path, trace)
+    write_json(checklist_path, checklist)
 
     return {
         "run_root": str(resolved_run_root),
         "state_path": str(state_path),
         "trace_path": str(trace_path),
+        "checklist_path": str(checklist_path),
     }
 
 

@@ -23,8 +23,11 @@ class ControllerReviewFlowTest(unittest.TestCase):
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
 
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n", encoding="utf-8")
+            spec_path.write_text("# Spec\nReview flow stays within the same task gate.\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n## Tasks\n1. Preserve gate identity during rework.\n",
+                encoding="utf-8",
+            )
 
             bootstrap = subprocess.run(
                 [
@@ -49,6 +52,12 @@ class ControllerReviewFlowTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["gate_id"], "gate-task-001")
+            self.assertEqual(state["gate_attempt"], 0)
+            self.assertFalse(state["cleanup_required"])
+            self.assertTrue((run_root / "watcher_checklist.json").exists())
 
             submit = subprocess.run(
                 [
@@ -136,6 +145,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["status"], "rework_required")
             self.assertEqual(state["owner"], "worker")
             self.assertEqual(state["next_action"], "worker_rework")
+            self.assertEqual(state["gate_id"], "gate-task-001")
+            self.assertEqual(state["gate_attempt"], 0)
             self.assertEqual(state["review"]["verdict"], "rework_required")
             self.assertEqual(state["review"]["scope_checked"], ["workflow/controller.py"])
             self.assertEqual(state["review"]["problems"], ["Completion is not gated on an approved review."])
@@ -169,6 +180,11 @@ class ControllerReviewFlowTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(resubmit.returncode, 0, resubmit.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "needs_review")
+            self.assertEqual(state["gate_id"], "gate-task-001")
+            self.assertEqual(state["gate_attempt"], 0)
 
             approve = subprocess.run(
                 [
@@ -281,6 +297,9 @@ class ControllerReviewFlowTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+            self.assertFalse((run_root / "state.json").exists())
+            self.assertFalse((run_root / "trace.md").exists())
+            self.assertFalse((run_root / "watcher_checklist.json").exists())
 
             settings = json.loads((project_dir / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
             self.assertNotIn("claudeYoloUntilDone", settings)

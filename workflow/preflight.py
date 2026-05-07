@@ -10,7 +10,7 @@ from pathlib import Path
 
 from bootstrap import bootstrap_run
 from hook_settings import install_hook_set
-from state import load_state, state_path, trace_path
+from state import load_json, load_state, serialize_path, state_path, trace_path
 
 
 ACTIVE_ENTRYPOINT = "cli"
@@ -65,6 +65,31 @@ def classify_run(run_root: Path) -> str:
     raise SystemExit("Mixed run bundle state detected; state.json and trace.md must either both exist or both be absent.")
 
 
+def load_first_checklist_task(checklist_path: Path) -> dict:
+    checklist = load_json(checklist_path)
+    tasks = checklist.get("tasks")
+    if not isinstance(tasks, list) or not tasks or not isinstance(tasks[0], dict):
+        raise SystemExit(f"Invalid checklist artifact: {checklist_path}")
+    return tasks[0]
+
+
+def validate_continue_run_paths(state: dict, project_dir: Path, spec_path: Path, plan_path: Path) -> None:
+    expected_spec_path = state.get("spec_path")
+    expected_plan_path = state.get("plan_path")
+    actual_spec_path = serialize_path(spec_path, project_dir)
+    actual_plan_path = serialize_path(plan_path, project_dir)
+    if expected_spec_path != actual_spec_path:
+        raise SystemExit(
+            "Continue-run mismatch: --spec does not match existing run bundle "
+            f"(state spec_path={expected_spec_path!r}, provided={actual_spec_path!r})"
+        )
+    if expected_plan_path != actual_plan_path:
+        raise SystemExit(
+            "Continue-run mismatch: --plan does not match existing run bundle "
+            f"(state plan_path={expected_plan_path!r}, provided={actual_plan_path!r})"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Classify and prepare a claude-yolo-until-done run before execution.")
     parser.add_argument("--project-dir", required=True, help="Target project directory")
@@ -114,12 +139,23 @@ def main() -> int:
             "run_root": bootstrap_summary["run_root"],
             "state_path": bootstrap_summary["state_path"],
             "trace_path": bootstrap_summary["trace_path"],
+            "checklist_path": bootstrap_summary["checklist_path"],
             "runtime_entrypoint": runtime["entrypoint"],
         }
         print(json.dumps(payload, ensure_ascii=True))
         return 0
 
+    checklist_path = run_root / "watcher_checklist.json"
+    if not checklist_path.exists():
+        raise SystemExit(f"Missing checklist artifact: {checklist_path}")
+
     state = load_state(run_root)
+    validate_continue_run_paths(state, project_dir, spec_path, plan_path)
+    first_checklist_task = load_first_checklist_task(checklist_path)
+    if state.get("task_inputs") != first_checklist_task:
+        raise SystemExit(
+            f"Continue-run mismatch: state task_inputs do not match first task in {checklist_path}"
+        )
     install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
     payload = {
         "classification": classification,

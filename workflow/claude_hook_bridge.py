@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from state import utc_now, write_state
+
 HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
@@ -30,6 +32,39 @@ def load_stdin_json() -> dict:
 
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def validate_stop_state(state: dict, run_root: Path) -> str | None:
+    required_fields = (
+        "status",
+        "cleanup_required",
+        "owner",
+        "next_action",
+        "requested_role",
+        "gate_attempt",
+        "gate_max_attempts",
+        "blocked_for_human",
+    )
+    for field in required_fields:
+        if field not in state:
+            return (
+                f"Run root exists at {run_root} but state.json is missing required field {field!r}; "
+                "stop stays blocked until the durable run bundle is repaired."
+            )
+    try:
+        gate_attempt = int(state["gate_attempt"])
+        gate_max_attempts = int(state["gate_max_attempts"])
+    except (TypeError, ValueError):
+        return (
+            f"Run root exists at {run_root} but gate counters are unreadable; "
+            "stop stays blocked until the durable run bundle is repaired."
+        )
+    if gate_attempt < 0 or gate_max_attempts <= 0:
+        return (
+            f"Run root exists at {run_root} but gate counters are invalid; "
+            "stop stays blocked until the durable run bundle is repaired."
+        )
+    return None
 
 
 def resolve_run_root(project_dir: Path, run_root_arg: str) -> Path:
@@ -100,48 +135,102 @@ def session_start(project_dir: Path, run_root: Path) -> int:
     return 0
 
 
-def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
-    if hook_input.get("stop_hook_active") is True:
-        return 0
+def emit_block(reason: str) -> int:
+    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
+    return 0
+
+
+def load_stop_state(run_root: Path) -> tuple[dict | None, str | None]:
+    if not run_root.exists():
+        return None, None
+    if not run_root.is_dir():
+        return None, f"Run root exists at {run_root} but is not a directory; stop stays blocked until the run bundle is repaired or removed."
 
     state_path = run_root / "state.json"
+    trace_path = run_root / "trace.md"
     if not state_path.exists():
+        return None, f"Run root exists at {run_root} but state.json is missing; stop stays blocked until the durable run bundle is repaired or cleaned up."
+    if not trace_path.exists():
+        return None, f"Run root exists at {run_root} but trace.md is missing; stop stays blocked until the durable run bundle is repaired or cleaned up."
+
+    try:
+        state = load_json(state_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, f"Run root exists at {run_root} but state.json is unreadable; stop stays blocked until the durable run bundle is repaired."
+
+    invalid_reason = validate_stop_state(state, run_root)
+    if invalid_reason:
+        return None, invalid_reason
+    return state, None
+
+
+def should_persist_worker_return_gate(state: dict) -> bool:
+    if state.get("owner") != "worker":
+        return False
+    if state.get("blocked_for_human"):
+        return False
+    if state.get("requested_role", "worker") != "worker":
+        return False
+    next_action = state.get("next_action", "")
+    return isinstance(next_action, str) and next_action.startswith("worker_")
+
+
+def persist_stop_gate(state: dict, run_root: Path) -> tuple[int, int, bool]:
+    attempts = int(state.get("gate_attempt", 0)) + 1
+    max_attempts = int(state.get("gate_max_attempts", 5))
+    state["gate_attempt"] = attempts
+    state["gate_reason"] = "worker_return_stop_block"
+    state["updated_at"] = utc_now()
+
+    reached_limit = attempts >= max_attempts
+    if reached_limit:
+        state["blocked_for_human"] = True
+        state["owner"] = "human"
+        state["next_action"] = "human_handoff"
+        state["requested_role"] = "human"
+        state["human_handoff"] = {"reason": "stop_gate_limit"}
+
+    write_state(run_root, state)
+    return attempts, max_attempts, reached_limit
+
+
+def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
+    state, broken_reason = load_stop_state(run_root)
+    if broken_reason:
+        return emit_block(broken_reason)
+    if state is None:
         return 0
 
-    state = load_json(state_path)
-    status = state.get("status")
+    status = state["status"]
+    if state["blocked_for_human"]:
+        handoff_reason = state.get("human_handoff", {}).get("reason")
+        if handoff_reason == "stop_gate_limit":
+            return emit_block("Workflow is blocked for human handoff because the stop gate limit was reached; record guidance or cancel the run before stopping.")
+        return emit_block("Workflow is blocked for human handoff; record guidance or cancel the run before stopping.")
+
     if status in ACTIVE_STATUSES:
         reason = f"Workflow status is {status}; continue the current goal instead of stopping."
-        print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
-        return 0
+        if should_persist_worker_return_gate(state):
+            attempts, max_attempts, reached_limit = persist_stop_gate(state, run_root)
+            if reached_limit:
+                reason = (
+                    f"Workflow status is {status}; stop gate hit worker return limit "
+                    f"({attempts}/{max_attempts}) and now requires human handoff."
+                )
+            else:
+                reason = f"{reason} Worker return stop gate attempt {attempts}/{max_attempts}."
+        return emit_block(reason)
 
     if state.get("cleanup_required"):
-        print(
-            json.dumps(
-                {
-                    "decision": "block",
-                    "reason": "Workflow completion still requires claude-yolo cleanup before stopping.",
-                },
-                ensure_ascii=True,
-            )
-        )
-        return 0
+        return emit_block("Workflow completion still requires claude-yolo cleanup before stopping.")
 
     if status == "complete":
         report = validate_completion(run_root)
         if not report.get("passed"):
-            print(
-                json.dumps(
-                    {
-                        "decision": "block",
-                        "reason": "Workflow says complete but completion validation still fails.",
-                    },
-                    ensure_ascii=True,
-                )
-            )
+            return emit_block("Workflow says complete but completion validation still fails.")
         return 0
 
-    return 0
+    return emit_block(f"Workflow status is {status!r}; stop stays blocked until the durable run state is repaired or completed.")
 
 
 def user_prompt_submit(project_dir: Path, run_root: Path, hook_input: dict) -> int:

@@ -36,6 +36,18 @@ def serialize_path(path: Path, repo_root: Path) -> str:
         return str(resolved_path)
 
 
+def apply_orchestration_defaults(state: dict) -> None:
+    task_id = state.get("task_id") or "task-001"
+    state["task_id"] = task_id
+    state.setdefault("gate_id", f"gate-{task_id}")
+    state.setdefault("gate_attempt", 0)
+    state.setdefault("gate_max_attempts", 5)
+    state.setdefault("requested_role", "worker")
+    state.setdefault("dispatch_status", "idle")
+    state.setdefault("blocked_for_human", False)
+
+
+
 def build_state(
     template_path: Path,
     goal: str,
@@ -58,6 +70,7 @@ def build_state(
     state["owner"] = "worker"
     state["next_action"] = "worker_update"
     state["cleanup_required"] = False
+    apply_orchestration_defaults(state)
     state["plan_path"] = serialize_path(plan_path, repo_root)
     state["spec_path"] = serialize_path(spec_path, repo_root)
     state["updated_at"] = utc_now()

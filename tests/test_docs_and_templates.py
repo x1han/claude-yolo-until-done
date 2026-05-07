@@ -9,6 +9,27 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DocsAndTemplatesTest(unittest.TestCase):
+    def test_agent_role_files_define_minimal_constraints(self) -> None:
+        cases = {
+            ".claude/agents/worker.md": [
+                "supplied task packet",
+                "Do not give final approval.",
+            ],
+            ".claude/agents/helper.md": [
+                "supplied task packet",
+                "Do not give final approval.",
+            ],
+            ".claude/agents/watcher.md": [
+                "independent review",
+                "checklist",
+                "verification evidence",
+            ],
+        }
+        for relative, required_strings in cases.items():
+            body = (SKILL_ROOT / relative).read_text(encoding="utf-8")
+            for required in required_strings:
+                self.assertIn(required, body, f"{relative}: missing {required!r}")
+
     def test_docs_describe_lightweight_runtime_only(self) -> None:
         legacy_terms = [
             "run_state.json",

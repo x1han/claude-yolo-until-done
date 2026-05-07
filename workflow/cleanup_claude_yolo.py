@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def remove_run_files(run_root: Path) -> None:
-    for name in ("state.json", "trace.md"):
+    for name in ("state.json", "trace.md", "watcher_checklist.json"):
         (run_root / name).unlink(missing_ok=True)
 
 
