@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
+from orchestrator import mark_dispatch_pending, orchestrate
 from state import append_trace_event, format_trace_value, load_state, utc_now, write_state
 
 
@@ -52,6 +53,7 @@ def update_for_submit(state: dict, args: argparse.Namespace) -> None:
     state["status"] = "needs_review"
     state["owner"] = "watcher"
     state["next_action"] = "watcher_review"
+    mark_dispatch_pending(state, "watcher")
     state["worker_claim"] = args.worker_claim
     state["files_changed"] = list(args.files_changed or [])
     state["verification_command"] = args.verification_command
@@ -84,6 +86,7 @@ def update_for_review(state: dict, args: argparse.Namespace) -> None:
         state["status"] = APPROVED_STATUS
         state["owner"] = "watcher"
         state["next_action"] = "watcher_complete"
+        mark_dispatch_pending(state, "watcher")
         review["problems"] = []
     else:
         require(review["problems"], "Rework review requires at least one problem.")
@@ -91,6 +94,7 @@ def update_for_review(state: dict, args: argparse.Namespace) -> None:
         state["status"] = "rework_required"
         state["owner"] = "worker"
         state["next_action"] = "worker_rework"
+        mark_dispatch_pending(state, "worker")
         review["acceptance_basis"] = []
 
     timestamp = utc_now()
@@ -142,6 +146,7 @@ def main() -> int:
         update_for_complete(state, args)
 
     write_state(run_root, state)
+    orchestrate(run_root, state)
     append_trace_event(run_root, trace_line(args, state))
 
     print(

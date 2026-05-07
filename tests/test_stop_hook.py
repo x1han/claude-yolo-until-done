@@ -101,7 +101,11 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("Workflow status is active", payload["reason"])
+        self.assertEqual(payload["orchestration"]["result"], "dispatched")
+        self.assertEqual(payload["orchestration"]["role"], "worker")
         self.assertEqual(updated_state["gate_attempt"], 1)
+        self.assertEqual(updated_state["dispatch_status"], "dispatched")
+        self.assertEqual(updated_state["last_dispatch"]["role"], "worker")
 
     def test_stop_blocks_incomplete_workflow_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -165,11 +169,15 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("requires human handoff", payload["reason"])
+        self.assertEqual(payload["orchestration"]["result"], "dispatched")
+        self.assertEqual(payload["orchestration"]["role"], "human")
         self.assertEqual(updated_state["gate_attempt"], 5)
         self.assertTrue(updated_state["blocked_for_human"])
         self.assertEqual(updated_state["owner"], "human")
         self.assertEqual(updated_state["next_action"], "human_handoff")
         self.assertEqual(updated_state["requested_role"], "human")
+        self.assertEqual(updated_state["dispatch_status"], "dispatched")
+        self.assertEqual(updated_state["last_dispatch"]["role"], "human")
         self.assertEqual(updated_state["human_handoff"], {"reason": "stop_gate_limit"})
 
     def test_stop_blocks_with_human_handoff_reason_after_limit_is_persisted(self) -> None:

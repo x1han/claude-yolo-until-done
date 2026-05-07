@@ -11,8 +11,8 @@ WORKFLOW_DIR = SKILL_ROOT / "workflow"
 if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
-from orchestrator import build_task_packet, next_step, resume_after_human
-from state import build_state
+from orchestrator import build_task_packet, mark_dispatch_pending, next_step, orchestrate, resume_after_human
+from state import build_state, load_state
 
 
 class OrchestratorStateTest(unittest.TestCase):
@@ -215,6 +215,70 @@ class OrchestratorRoutingTest(unittest.TestCase):
                 "Focus only on orchestrator resume state.",
             ],
         )
+
+    def test_mark_dispatch_pending_resets_dispatch_fields(self) -> None:
+        state = {"requested_role": "worker", "dispatch_status": "dispatched", "last_dispatch": {"role": "worker"}}
+
+        mark_dispatch_pending(state, "watcher")
+
+        self.assertEqual(state["requested_role"], "watcher")
+        self.assertEqual(state["dispatch_status"], "idle")
+        self.assertEqual(state["last_dispatch"], {})
+
+    def test_orchestrate_dispatches_requested_role_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = {
+                "task_id": "task-001",
+                "task_title": "Implement gate logic",
+                "task_goal": "Keep stop fail-closed.",
+                "task_scope": ["workflow/claude_hook_bridge.py"],
+                "task_inputs": {"plan_task_text": "Task text", "spec_excerpt": "Spec text", "checklist_items": ["check fresh evidence"]},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 1,
+                "gate_max_attempts": 5,
+                "gate_reason": "worker_returned",
+                "requested_role": "watcher",
+                "dispatch_status": "idle",
+                "worker_request": "",
+                "verification_command": "python -m unittest source.tests.test_stop_hook -v",
+                "verification_result": "passed",
+                "blocked_for_human": False,
+            }
+
+            result = orchestrate(run_root, state)
+            persisted = load_state(run_root)
+
+        self.assertEqual(result["result"], "dispatched")
+        self.assertEqual(result["role"], "watcher")
+        self.assertEqual(persisted["dispatch_status"], "dispatched")
+        self.assertEqual(persisted["last_dispatch"]["role"], "watcher")
+        self.assertEqual(persisted["last_dispatch"]["task_packet"]["plan_task_text"], "Task text")
+
+    def test_orchestrate_noops_after_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = {
+                "task_id": "task-001",
+                "task_title": "Implement gate logic",
+                "task_goal": "Keep stop fail-closed.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "worker",
+                "dispatch_status": "dispatched",
+                "last_dispatch": {"role": "worker"},
+                "blocked_for_human": False,
+            }
+
+            result = orchestrate(run_root, state)
+
+        self.assertEqual(result["result"], "no_op")
+        self.assertIn("dispatch_status=dispatched", result["reason"])
 
 
 if __name__ == "__main__":

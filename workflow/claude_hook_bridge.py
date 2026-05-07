@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from orchestrator import orchestrate
 from state import utc_now, write_state
 
 HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
@@ -135,8 +136,11 @@ def session_start(project_dir: Path, run_root: Path) -> int:
     return 0
 
 
-def emit_block(reason: str) -> int:
-    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
+def emit_block(reason: str, orchestration: dict | None = None) -> int:
+    payload = {"decision": "block", "reason": reason}
+    if orchestration:
+        payload["orchestration"] = orchestration
+    print(json.dumps(payload, ensure_ascii=True))
     return 0
 
 
@@ -188,6 +192,8 @@ def persist_stop_gate(state: dict, run_root: Path) -> tuple[int, int, bool]:
         state["owner"] = "human"
         state["next_action"] = "human_handoff"
         state["requested_role"] = "human"
+        state["dispatch_status"] = "idle"
+        state["last_dispatch"] = {}
         state["human_handoff"] = {"reason": "stop_gate_limit"}
 
     write_state(run_root, state)
@@ -203,10 +209,14 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
 
     status = state["status"]
     if state["blocked_for_human"]:
+        orchestration = orchestrate(run_root, state)
         handoff_reason = state.get("human_handoff", {}).get("reason")
         if handoff_reason == "stop_gate_limit":
-            return emit_block("Workflow is blocked for human handoff because the stop gate limit was reached; record guidance or cancel the run before stopping.")
-        return emit_block("Workflow is blocked for human handoff; record guidance or cancel the run before stopping.")
+            return emit_block(
+                "Workflow is blocked for human handoff because the stop gate limit was reached; record guidance or cancel the run before stopping.",
+                orchestration,
+            )
+        return emit_block("Workflow is blocked for human handoff; record guidance or cancel the run before stopping.", orchestration)
 
     if status in ACTIVE_STATUSES:
         reason = f"Workflow status is {status}; continue the current goal instead of stopping."
@@ -219,7 +229,9 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
                 )
             else:
                 reason = f"{reason} Worker return stop gate attempt {attempts}/{max_attempts}."
-        return emit_block(reason)
+            state = load_json(run_root / "state.json")
+        orchestration = orchestrate(run_root, state)
+        return emit_block(reason, orchestration)
 
     if state.get("cleanup_required"):
         return emit_block("Workflow completion still requires claude-yolo cleanup before stopping.")

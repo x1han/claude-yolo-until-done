@@ -96,6 +96,9 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["verification_result"], "pass")
             self.assertTrue(state["submitted_at"])
             self.assertEqual(state["review"], {})
+            self.assertEqual(state["requested_role"], "watcher")
+            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
             worker_complete = subprocess.run(
                 [
@@ -153,6 +156,9 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["review"]["required_rework"], ["Require watcher approval before completion."])
             self.assertEqual(state["review"]["acceptance_basis"], [])
             self.assertTrue(state["reviewed_at"])
+            self.assertEqual(state["requested_role"], "worker")
+            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["last_dispatch"]["role"], "worker")
 
             resubmit = subprocess.run(
                 [
@@ -185,6 +191,9 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["status"], "needs_review")
             self.assertEqual(state["gate_id"], "gate-task-001")
             self.assertEqual(state["gate_attempt"], 0)
+            self.assertEqual(state["requested_role"], "watcher")
+            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
             approve = subprocess.run(
                 [
@@ -228,6 +237,9 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "Submission and rework transitions match the workflow contract.",
                 ],
             )
+            self.assertEqual(state["requested_role"], "watcher")
+            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
             complete = subprocess.run(
                 [

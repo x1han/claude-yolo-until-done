@@ -44,6 +44,13 @@ def apply_orchestration_defaults(state: dict) -> None:
     state.setdefault("gate_max_attempts", 5)
     state.setdefault("requested_role", "worker")
     state.setdefault("dispatch_status", "idle")
+    state.setdefault("last_dispatch", {})
+    state.setdefault("worker_request", "")
+    state.setdefault("worker_question", "")
+    state.setdefault("human_handoff", {})
+    state.setdefault("task_handoff_notes", [])
+    state.setdefault("task_scope", [])
+    state.setdefault("task_goal", state.get("goal", ""))
     state.setdefault("blocked_for_human", False)
 
 
