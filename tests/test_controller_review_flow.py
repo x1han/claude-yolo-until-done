@@ -22,7 +22,7 @@ RUN_GATE_PATH = SKILL_ROOT / "hooks" / "run_gate.py"
 
 
 class ControllerReviewFlowTest(unittest.TestCase):
-    def test_update_for_helper_request_rejects_need_human_when_disabled(self) -> None:
+    def test_no_human_run_rejects_need_human(self) -> None:
         state = {
             "allow_need_human": False,
             "owner": "worker",
@@ -33,6 +33,7 @@ class ControllerReviewFlowTest(unittest.TestCase):
             "blocked_for_human": False,
             "worker_request": "",
             "worker_question": "",
+            "human_handoff": {"summary": "stale"},
         }
 
         with self.assertRaisesRegex(SystemExit, "forbids need_human"):
@@ -41,6 +42,34 @@ class ControllerReviewFlowTest(unittest.TestCase):
         self.assertFalse(state["blocked_for_human"])
         self.assertEqual(state["worker_request"], "")
         self.assertEqual(state["worker_question"], "")
+
+    def test_no_human_run_still_allows_need_helper_and_clears_stale_human_state(self) -> None:
+        state = {
+            "allow_need_human": False,
+            "owner": "human",
+            "next_action": "human_handoff",
+            "requested_role": "human",
+            "dispatch_status": "dispatched",
+            "last_dispatch": {"role": "human"},
+            "blocked_for_human": True,
+            "worker_request": "need_human",
+            "worker_question": "Need product guidance.",
+            "human_handoff": {"summary": "stale"},
+            "gate_reason": "stale_handoff",
+        }
+
+        update_for_helper_request(state, "need_helper", "Check validator scope.")
+
+        self.assertFalse(state["blocked_for_human"])
+        self.assertEqual(state["human_handoff"], {})
+        self.assertEqual(state["owner"], "worker")
+        self.assertEqual(state["next_action"], "worker_update")
+        self.assertEqual(state["worker_request"], "need_helper")
+        self.assertEqual(state["worker_question"], "Check validator scope.")
+        self.assertEqual(state["requested_role"], "helper")
+        self.assertEqual(state["dispatch_status"], "idle")
+        self.assertEqual(state["last_dispatch"], {})
+        self.assertEqual(state["gate_reason"], "")
 
     def test_worker_submit_then_watcher_reject_approve_and_complete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

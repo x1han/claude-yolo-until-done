@@ -67,6 +67,11 @@ class HumanHandoffCliTest(unittest.TestCase):
             check=False,
         )
 
+    def run_handoff_expect_failure(self, run_root: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+        result = self.run_handoff(run_root, *extra_args)
+        self.assertNotEqual(result.returncode, 0)
+        return result
+
     def test_continue_discussing_persists_summary_without_resuming(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp) / ".yolo"
@@ -146,6 +151,21 @@ class HumanHandoffCliTest(unittest.TestCase):
             self.assertIn("Explicit resume requires resume_ready=true.", result.stderr)
             after = self.load_state(run_root)
             self.assertEqual(after, before)
+
+    def test_human_handoff_cli_rejects_runs_that_disable_need_human(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            self.write_run_state(run_root, allow_need_human=False)
+
+            result = self.run_handoff_expect_failure(
+                run_root,
+                "--summary",
+                "Only update steps 1-2.",
+                "--resume-ready",
+                "false",
+            )
+
+            self.assertIn("Human handoff is disabled for this run.", result.stderr)
 
     def test_resume_after_human_signature_has_no_checklist_parameter(self) -> None:
         parameters = inspect.signature(human_handoff.resume_after_human).parameters

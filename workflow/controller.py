@@ -52,6 +52,7 @@ def clear_transient_routing_fields(state: dict) -> None:
 
 
 def update_for_helper_request(state: dict, request: str, question: str) -> None:
+    require(request in {"need_helper", "need_human"}, f"Unsupported worker request: {request}")
     if request == "need_human":
         require(state.get("allow_need_human", True), "This run forbids need_human escalation.")
         state["blocked_for_human"] = True
@@ -60,6 +61,13 @@ def update_for_helper_request(state: dict, request: str, question: str) -> None:
         state["next_action"] = "human_handoff"
         state["gate_reason"] = ""
         mark_dispatch_pending(state, "human")
+    else:
+        state["blocked_for_human"] = False
+        state["human_handoff"] = {}
+        state["owner"] = "worker"
+        state["next_action"] = "worker_update"
+        state["gate_reason"] = ""
+        mark_dispatch_pending(state, "helper")
     state["worker_request"] = request
     state["worker_question"] = question
 
