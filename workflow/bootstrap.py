@@ -30,6 +30,7 @@ def bootstrap_run(
     goal: str,
     success_criteria: list[str],
     repo_root: Path,
+    allow_need_human: bool | None = None,
 ) -> dict:
     fail_if_unsupported_headless_mode()
 
@@ -47,6 +48,8 @@ def bootstrap_run(
         spec_path=spec_path,
         repo_root=repo_root,
     )
+    if allow_need_human is False:
+        state["allow_need_human"] = False
     checklist = build_master_checklist(spec_path, plan_path)
     first_task = checklist["tasks"][0]
     state["task_title"] = first_task["task_title"]
@@ -85,6 +88,11 @@ def main() -> int:
         default=[],
         help="Success criterion for this run; repeat to provide multiple entries",
     )
+    parser.add_argument(
+        "--disallow-need-human",
+        action="store_true",
+        help="Disable worker need_human escalation for this run.",
+    )
     args = parser.parse_args()
 
     summary = bootstrap_run(
@@ -94,6 +102,7 @@ def main() -> int:
         goal=args.goal,
         success_criteria=args.success_criteria,
         repo_root=Path.cwd(),
+        allow_need_human=False if args.disallow_need_human else None,
     )
     print(json.dumps(summary, ensure_ascii=True))
     return 0

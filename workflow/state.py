@@ -52,6 +52,7 @@ def apply_orchestration_defaults(state: dict) -> None:
     state.setdefault("task_scope", [])
     state.setdefault("task_goal", state.get("goal", ""))
     state.setdefault("blocked_for_human", False)
+    state.setdefault("allow_need_human", True)
 
 
 

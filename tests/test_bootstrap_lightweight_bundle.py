@@ -13,6 +13,44 @@ BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
 
 
 class BootstrapLightweightBundleTest(unittest.TestCase):
+    def run_bootstrap(self, *extra_args: str) -> dict:
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        project_dir = Path(temp_dir.name)
+        spec_path = project_dir / "spec.md"
+        plan_path = project_dir / "plan.md"
+        run_root = project_dir / "artifacts" / "run-001"
+
+        spec_path.write_text("# Spec\n", encoding="utf-8")
+        plan_path.write_text("# Plan\n\n### Task 1: Ship the lightweight run bundle\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(BOOTSTRAP_PATH),
+                "--spec",
+                str(spec_path),
+                "--plan",
+                str(plan_path),
+                "--run-root",
+                str(run_root),
+                "--goal",
+                "Ship the lightweight run bundle.",
+                "--success-criterion",
+                "state.json captures the authoritative run state.",
+                "--success-criterion",
+                "trace.md records the bootstrap handoff.",
+                *extra_args,
+            ],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def test_bootstrap_rejects_headless_claude_print_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -54,97 +92,77 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertFalse((run_root / "state.json").exists())
             self.assertFalse((run_root / "trace.md").exists())
 
+    def test_bootstrap_defaults_allow_need_human_true(self) -> None:
+        result = self.run_bootstrap()
+        state = json.loads((Path(result["run_root"]) / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["allow_need_human"])
+
+    def test_bootstrap_persists_explicit_no_human_override(self) -> None:
+        result = self.run_bootstrap("--disallow-need-human")
+        state = json.loads((Path(result["run_root"]) / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["allow_need_human"])
+
     def test_bootstrap_writes_lightweight_run_bundle(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_dir = Path(tmp)
-            spec_path = project_dir / "spec.md"
-            plan_path = project_dir / "plan.md"
-            run_root = project_dir / "artifacts" / "run-001"
+        result = self.run_bootstrap()
+        run_root = Path(result["run_root"])
 
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Ship the lightweight run bundle\n", encoding="utf-8")
+        state_path = run_root / "state.json"
+        trace_path = run_root / "trace.md"
+        checklist_path = run_root / "watcher_checklist.json"
+        self.assertTrue(state_path.exists())
+        self.assertTrue(trace_path.exists())
+        self.assertTrue(checklist_path.exists())
 
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(BOOTSTRAP_PATH),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    str(run_root),
-                    "--goal",
-                    "Ship the lightweight run bundle.",
-                    "--success-criterion",
-                    "state.json captures the authoritative run state.",
-                    "--success-criterion",
-                    "trace.md records the bootstrap handoff.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["goal"], "Ship the lightweight run bundle.")
+        self.assertEqual(
+            state["success_criteria"],
+            [
+                "state.json captures the authoritative run state.",
+                "trace.md records the bootstrap handoff.",
+            ],
+        )
+        self.assertEqual(state["status"], "active")
+        self.assertEqual(state["owner"], "worker")
+        self.assertEqual(state["next_action"], "worker_update")
+        self.assertFalse(state["cleanup_required"])
+        self.assertTrue(state["allow_need_human"])
+        self.assertEqual(state["plan_path"], "plan.md")
+        self.assertEqual(state["spec_path"], "spec.md")
+        self.assertEqual(state["task_id"], "task-001")
+        self.assertEqual(state["task_title"], "Ship the lightweight run bundle")
+        self.assertEqual(state["task_inputs"]["task_id"], "task-001")
+        self.assertEqual(state["worker_claim"], "")
+        self.assertEqual(state["files_changed"], [])
+        self.assertEqual(state["verification_command"], "")
+        self.assertEqual(state["verification_result"], "")
+        self.assertEqual(state["submitted_at"], "")
+        self.assertEqual(state["review"], {})
+        self.assertEqual(state["reviewed_at"], "")
+        self.assertIn("updated_at", state)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+        checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(checklist["tasks"]), 1)
+        self.assertEqual(checklist["tasks"][0]["task_title"], "Ship the lightweight run bundle")
 
-            state_path = run_root / "state.json"
-            trace_path = run_root / "trace.md"
-            checklist_path = run_root / "watcher_checklist.json"
-            self.assertTrue(state_path.exists())
-            self.assertTrue(trace_path.exists())
-            self.assertTrue(checklist_path.exists())
+        trace = trace_path.read_text(encoding="utf-8")
+        self.assertIn("# Goal", trace)
+        self.assertIn("Ship the lightweight run bundle.", trace)
+        self.assertIn("## Success Criteria", trace)
+        self.assertIn("- state.json captures the authoritative run state.", trace)
+        self.assertIn("- trace.md records the bootstrap handoff.", trace)
+        self.assertIn("bootstrap", trace.lower())
 
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(state["goal"], "Ship the lightweight run bundle.")
-            self.assertEqual(
-                state["success_criteria"],
-                [
-                    "state.json captures the authoritative run state.",
-                    "trace.md records the bootstrap handoff.",
-                ],
-            )
-            self.assertEqual(state["status"], "active")
-            self.assertEqual(state["owner"], "worker")
-            self.assertEqual(state["next_action"], "worker_update")
-            self.assertFalse(state["cleanup_required"])
-            self.assertEqual(state["plan_path"], "plan.md")
-            self.assertEqual(state["spec_path"], "spec.md")
-            self.assertEqual(state["task_id"], "task-001")
-            self.assertEqual(state["task_title"], "Ship the lightweight run bundle")
-            self.assertEqual(state["task_inputs"]["task_id"], "task-001")
-            self.assertEqual(state["worker_claim"], "")
-            self.assertEqual(state["files_changed"], [])
-            self.assertEqual(state["verification_command"], "")
-            self.assertEqual(state["verification_result"], "")
-            self.assertEqual(state["submitted_at"], "")
-            self.assertEqual(state["review"], {})
-            self.assertEqual(state["reviewed_at"], "")
-            self.assertIn("updated_at", state)
-
-            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
-            self.assertEqual(len(checklist["tasks"]), 1)
-            self.assertEqual(checklist["tasks"][0]["task_title"], "Ship the lightweight run bundle")
-
-            trace = trace_path.read_text(encoding="utf-8")
-            self.assertIn("# Goal", trace)
-            self.assertIn("Ship the lightweight run bundle.", trace)
-            self.assertIn("## Success Criteria", trace)
-            self.assertIn("- state.json captures the authoritative run state.", trace)
-            self.assertIn("- trace.md records the bootstrap handoff.", trace)
-            self.assertIn("bootstrap", trace.lower())
-
-            for obsolete_name in [
-                "runtime_context.json",
-                "run_state.json",
-                "gates.json",
-                "checkoffs.json",
-                "workflow_manifest.json",
-                "report.md",
-                "resume.md",
-            ]:
-                self.assertFalse((run_root / obsolete_name).exists(), obsolete_name)
+        for obsolete_name in [
+            "runtime_context.json",
+            "run_state.json",
+            "gates.json",
+            "checkoffs.json",
+            "workflow_manifest.json",
+            "report.md",
+            "resume.md",
+        ]:
+            self.assertFalse((run_root / obsolete_name).exists(), obsolete_name)
 
 
 if __name__ == "__main__":
