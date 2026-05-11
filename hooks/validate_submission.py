@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from common import add_check, base_report, load_state, load_trace_text, trace_path, validate_required_state_fields
+from common import add_check, base_report, load_state, validate_required_state_fields
 
 
 REQUIRED_REVIEW_STATUS = "needs_review"
@@ -11,8 +11,8 @@ REQUIRED_NEXT_ACTION = "watcher_review"
 def run(run_root):
     report = base_report(stage="submission", run_root=run_root)
     state = load_state(run_root)
-    trace_exists = trace_path(run_root).exists()
-    trace_body = load_trace_text(run_root) if trace_exists else ""
+    certification = state.get("certification", {}) if isinstance(state.get("certification"), dict) else {}
+    submission_certification = certification.get("submission", {}) if isinstance(certification.get("submission"), dict) else {}
     validate_required_state_fields(report, state)
     add_check(report, "status_is_needs_review", state.get("status") == REQUIRED_REVIEW_STATUS, f"status={state.get('status')}")
     add_check(report, "owner_is_watcher", state.get("owner") == REQUIRED_OWNER, f"owner={state.get('owner')}")
@@ -27,10 +27,28 @@ def run(run_root):
     add_check(
         report,
         "dispatch_matches_review_target",
-        state.get("dispatch_status") != "dispatched"
-        or (state.get("last_dispatch") or {}).get("role") == "watcher",
+        (state.get("last_dispatch") or {}).get("role") == "watcher",
         f"dispatch_status={state.get('dispatch_status')} last_dispatch={state.get('last_dispatch')}",
     )
-    add_check(report, "trace_exists", trace_exists, f"trace_path={trace_path(run_root)}")
-    add_check(report, "trace_mentions_worker_submit", "worker submit:" in trace_body, f"trace_path={trace_path(run_root)}")
+    add_check(
+        report,
+        "dispatch_consumed_for_review",
+        state.get("dispatch_status") == "completed",
+        f"dispatch_status={state.get('dispatch_status')} last_dispatch={state.get('last_dispatch')}",
+    )
+    if submission_certification.get("status") == "ok":
+        add_check(
+            report,
+            "submission_certification_status_ok",
+            True,
+            f"submission_certification={submission_certification}",
+        )
+    else:
+        report["warnings"].append(
+            {
+                "name": "submission_certification_not_authoritative",
+                "detail": f"submission_certification={submission_certification}",
+                "source": "state.json",
+            }
+        )
     return report

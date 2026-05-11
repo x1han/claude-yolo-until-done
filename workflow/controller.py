@@ -5,13 +5,21 @@ import argparse
 import json
 from pathlib import Path
 
-from orchestrator import mark_dispatch_pending, orchestrate
-from state import append_trace_event, format_trace_value, load_state, utc_now, write_state
+from lifecycle import (
+    ACTIVE_STATUS,
+    APPROVED_STATUS,
+    NEEDS_REVIEW_STATUS,
+    READY_FOR_CLEANUP_STATUS,
+    REWORK_REQUIRED_STATUS,
+    build_completion_certification,
+    clear_completion_certification,
+    compute_certification_hash,
+)
+from orchestrator import IDLE_STATUS, LIVE_CLAIM_STATUSES, PENDING_STATUS, consume_dispatch, default_consumer_id, dispatch_consumer_id, mark_dispatch_pending
+from state import StaleStateVersionError, append_trace_event, build_resume_target, format_trace_value, transition_state
 
 
-ALLOWED_SUBMIT_STATUSES = {"active", "rework_required"}
-APPROVED_STATUS = "approved"
-COMPLETE_STATUS = "complete"
+ALLOWED_SUBMIT_STATUSES = {ACTIVE_STATUS, REWORK_REQUIRED_STATUS}
 
 
 def parse_args() -> argparse.Namespace:
@@ -19,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-root", required=True, help="Path to the run bundle root")
     parser.add_argument("--actor", required=True, choices=("worker", "watcher"))
     parser.add_argument("--action", required=True, choices=("submit", "review", "complete"))
+    parser.add_argument("--expected-version", required=True, type=int)
 
     parser.add_argument("--worker-claim")
     parser.add_argument("--files-changed", nargs="*")
@@ -45,6 +54,7 @@ def require(condition: bool, message: str) -> None:
 def clear_transient_routing_fields(state: dict) -> None:
     state["blocked_for_human"] = False
     state["human_handoff"] = {}
+    state["resume_target"] = {}
     state["worker_request"] = ""
     state["worker_question"] = ""
     state["gate_reason"] = ""
@@ -55,6 +65,7 @@ def update_for_helper_request(state: dict, request: str, question: str) -> None:
     require(request in {"need_helper", "need_human"}, f"Unsupported worker request: {request}")
     if request == "need_human":
         require(state.get("allow_need_human", True), "This run forbids need_human escalation.")
+        state["resume_target"] = build_resume_target(state)
         state["blocked_for_human"] = True
         state["human_handoff"] = {}
         state["owner"] = "human"
@@ -64,6 +75,7 @@ def update_for_helper_request(state: dict, request: str, question: str) -> None:
     else:
         state["blocked_for_human"] = False
         state["human_handoff"] = {}
+        state["resume_target"] = {}
         state["owner"] = "worker"
         state["next_action"] = "worker_update"
         state["gate_reason"] = ""
@@ -73,15 +85,38 @@ def update_for_helper_request(state: dict, request: str, question: str) -> None:
 
 
 
-def update_for_submit(state: dict, args: argparse.Namespace) -> None:
+def require_dispatch_authority(state: dict, role: str, action_label: str) -> None:
+    dispatch_status = state.get("dispatch_status", IDLE_STATUS)
+    if dispatch_status == PENDING_STATUS:
+        intent = state.get("dispatch_intent") if isinstance(state.get("dispatch_intent"), dict) else {}
+        pending_role = intent.get("role") if isinstance(intent.get("role"), str) and intent.get("role") else state.get("requested_role", "worker")
+        require(pending_role == role, f"{action_label} requires current dispatch authority.")
+        return
+
+    require(dispatch_status in LIVE_CLAIM_STATUSES, f"{action_label} requires current dispatch authority.")
+    claim = state.get("dispatch_claim") if isinstance(state.get("dispatch_claim"), dict) else {}
+    require(claim.get("owner") == dispatch_consumer_id(state, role), f"{action_label} requires current dispatch authority.")
+
+
+
+def publish_next_dispatch(state: dict) -> dict | None:
+    if state.get("dispatch_status") != PENDING_STATUS:
+        return None
+    result, _mutated, _trace_required = consume_dispatch(state, consumer_id=default_consumer_id(state))
+    require(result.get("result") == "dispatched", f"Unable to publish next dispatch: {result}")
+    return result
+
+
+def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> None:
     require(args.actor == "worker", "Only the worker may submit.")
     require(state.get("status") in ALLOWED_SUBMIT_STATUSES, "Worker submit requires active or rework_required state.")
+    require_dispatch_authority(state, "worker", "Worker submit")
     require(args.worker_claim is not None, "--worker-claim is required for submit.")
     require(args.verification_command is not None, "--verification-command is required for submit.")
     require(args.verification_result is not None, "--verification-result is required for submit.")
 
-    timestamp = utc_now()
-    state["status"] = "needs_review"
+    clear_completion_certification(state)
+    state["status"] = NEEDS_REVIEW_STATUS
     state["owner"] = "watcher"
     state["next_action"] = "watcher_review"
     clear_transient_routing_fields(state)
@@ -93,7 +128,6 @@ def update_for_submit(state: dict, args: argparse.Namespace) -> None:
     state["submitted_at"] = timestamp
     state["review"] = {}
     state["reviewed_at"] = ""
-    state["updated_at"] = timestamp
 
 
 def build_review_payload(args: argparse.Namespace) -> dict:
@@ -106,11 +140,13 @@ def build_review_payload(args: argparse.Namespace) -> dict:
     }
 
 
-def update_for_review(state: dict, args: argparse.Namespace) -> None:
+def update_for_review(state: dict, args: argparse.Namespace, timestamp: str) -> None:
     require(args.actor == "watcher", "Only the watcher may review.")
-    require(state.get("status") == "needs_review", "Watcher review requires needs_review state.")
+    require(state.get("status") == NEEDS_REVIEW_STATUS, "Watcher review requires needs_review state.")
+    require_dispatch_authority(state, "watcher", "Watcher review")
     require(args.verdict is not None, "--verdict is required for review.")
 
+    clear_completion_certification(state)
     review = build_review_payload(args)
     if args.verdict == "approve":
         require(not review["required_rework"], "Approved review cannot include required rework.")
@@ -124,34 +160,36 @@ def update_for_review(state: dict, args: argparse.Namespace) -> None:
     else:
         require(review["problems"], "Rework review requires at least one problem.")
         require(review["required_rework"], "Rework review requires at least one required rework item.")
-        state["status"] = "rework_required"
+        state["status"] = REWORK_REQUIRED_STATUS
         state["owner"] = "worker"
         state["next_action"] = "worker_rework"
         clear_transient_routing_fields(state)
         mark_dispatch_pending(state, "worker")
         review["acceptance_basis"] = []
 
-    timestamp = utc_now()
     state["review"] = review
     state["reviewed_at"] = timestamp
-    state["updated_at"] = timestamp
 
 
-def update_for_complete(state: dict, args: argparse.Namespace) -> None:
+def update_for_complete(state: dict, args: argparse.Namespace, _: str) -> None:
     require(args.actor == "watcher", "Only the watcher may complete.")
     require(state.get("status") == APPROVED_STATUS, "Completion requires an approved review.")
+    require_dispatch_authority(state, "watcher", "Watcher complete")
     review = state.get("review", {})
     require(review.get("verdict") == "approve", "Completion requires watcher approval in review state.")
 
-    timestamp = utc_now()
-    state["status"] = COMPLETE_STATUS
+    state["status"] = READY_FOR_CLEANUP_STATUS
     state["owner"] = "watcher"
     state["next_action"] = "complete"
     state["cleanup_required"] = True
     clear_transient_routing_fields(state)
-    state["dispatch_status"] = "idle"
+    completion = build_completion_certification(state, _)
+    certification = state.get("certification") if isinstance(state.get("certification"), dict) else {}
+    certification["completion"] = completion
+    state["certification"] = certification
+    state["certification_hash"] = compute_certification_hash(completion)
+    state["dispatch_status"] = IDLE_STATUS
     state["last_dispatch"] = {}
-    state["updated_at"] = timestamp
 
 
 def trace_line(args: argparse.Namespace, state: dict) -> str:
@@ -173,18 +211,42 @@ def trace_line(args: argparse.Namespace, state: dict) -> str:
 def main() -> int:
     args = parse_args()
     run_root = Path(args.run_root).resolve()
-    state = load_state(run_root)
+    orchestration: dict | None = None
 
-    if args.action == "submit":
-        update_for_submit(state, args)
-    elif args.action == "review":
-        update_for_review(state, args)
-    else:
-        update_for_complete(state, args)
+    def progress_transition(current_state: dict, _: str) -> None:
+        nonlocal orchestration
+        orchestration = publish_next_dispatch(current_state)
 
-    write_state(run_root, state)
-    if args.action != "complete":
-        orchestrate(run_root, state)
+    try:
+        if args.action == "submit":
+            state = transition_state(
+                run_root,
+                actor=args.actor,
+                action=args.action,
+                expected_version=args.expected_version,
+                apply_transition=lambda current_state, timestamp: update_for_submit(current_state, args, timestamp),
+                progress_transition=progress_transition,
+            )
+        elif args.action == "review":
+            state = transition_state(
+                run_root,
+                actor=args.actor,
+                action=args.action,
+                expected_version=args.expected_version,
+                apply_transition=lambda current_state, timestamp: update_for_review(current_state, args, timestamp),
+                progress_transition=progress_transition,
+            )
+        else:
+            state = transition_state(
+                run_root,
+                actor=args.actor,
+                action=args.action,
+                expected_version=args.expected_version,
+                apply_transition=lambda current_state, timestamp: update_for_complete(current_state, args, timestamp),
+            )
+    except StaleStateVersionError as error:
+        fail(str(error))
+
     append_trace_event(run_root, trace_line(args, state))
 
     print(
@@ -194,6 +256,8 @@ def main() -> int:
                 "status": state["status"],
                 "owner": state["owner"],
                 "next_action": state["next_action"],
+                "dispatch_status": state.get("dispatch_status"),
+                "orchestration": orchestration,
             },
             ensure_ascii=True,
         )

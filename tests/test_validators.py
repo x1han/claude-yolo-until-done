@@ -8,14 +8,25 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 HOOKS_DIR = SKILL_ROOT / "hooks"
+WORKFLOW_DIR = SKILL_ROOT / "workflow"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
+if str(WORKFLOW_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_DIR))
 
+from lifecycle import build_completion_certification, compute_certification_hash
 from validate_completion import run as validate_completion
 from validate_submission import run as validate_submission
 
 
 class ValidatorsTest(unittest.TestCase):
+    def completion_certification(self, state: dict) -> dict:
+        payload = build_completion_certification(state, "2026-05-01T00:01:30Z")
+        return {
+            "certification": {"completion": payload},
+            "certification_hash": compute_certification_hash(payload),
+        }
+
     def test_submission_validator_rejects_missing_worker_claim(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)
@@ -25,6 +36,9 @@ class ValidatorsTest(unittest.TestCase):
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
                         "status": "needs_review",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "",
                         "files_changed": ["src/app.py"],
                         "verification_command": "pytest -q",
@@ -54,6 +68,9 @@ class ValidatorsTest(unittest.TestCase):
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
                         "status": "needs_review",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "Updated file",
                         "files_changed": ["workflow/controller.py"],
                         "verification_command": "python -m unittest -v",
@@ -79,6 +96,85 @@ class ValidatorsTest(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("dispatch_matches_review_target", {item["name"] for item in report["failures"]})
 
+    def test_submission_validator_reports_from_authoritative_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "goal": "Fix it.",
+                        "success_criteria": ["It works."],
+                        "status": "needs_review",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                        "worker_claim": "Updated parser handling.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed: 1 passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {},
+                        "reviewed_at": "",
+                        "owner": "watcher",
+                        "next_action": "watcher_review",
+                        "cleanup_required": False,
+                        "requested_role": "watcher",
+                        "dispatch_status": "completed",
+                        "last_dispatch": {"role": "watcher", "task_id": "task-001"},
+                        "certification": {
+                            "submission": {
+                                "status": "stale",
+                                "state_version": 1,
+                                "actor": "worker",
+                                "action": "submit",
+                            }
+                        },
+                        "plan_path": "docs/plan.md",
+                        "spec_path": "docs/spec.md",
+                        "updated_at": "2026-05-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = validate_submission(run_root)
+            self.assertTrue(report["passed"])
+            self.assertTrue(all(item["source"] == "state.json" for item in report["checks"]))
+            self.assertEqual(report["warnings"][0]["name"], "submission_certification_not_authoritative")
+
+    def test_submission_validator_rejects_missing_authoritative_task_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "goal": "Fix it.",
+                        "success_criteria": ["It works."],
+                        "status": "needs_review",
+                        "worker_claim": "Updated parser handling.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed: 1 passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {},
+                        "reviewed_at": "",
+                        "owner": "watcher",
+                        "next_action": "watcher_review",
+                        "cleanup_required": False,
+                        "plan_path": "docs/plan.md",
+                        "spec_path": "docs/spec.md",
+                        "updated_at": "2026-05-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = validate_submission(run_root)
+            self.assertFalse(report["passed"])
+            self.assertTrue(
+                {"state_field_task_id_present", "state_field_task_title_present", "state_field_task_inputs_present"}.issubset(
+                    {item["name"] for item in report["failures"]}
+                )
+            )
+
     def test_completion_validator_rejects_complete_without_approved_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)
@@ -87,7 +183,10 @@ class ValidatorsTest(unittest.TestCase):
                     {
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
-                        "status": "complete",
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "Updated parser handling.",
                         "files_changed": ["src/app.py"],
                         "verification_command": "pytest -q",
@@ -108,7 +207,7 @@ class ValidatorsTest(unittest.TestCase):
             report = validate_completion(run_root)
             self.assertFalse(report["passed"])
 
-    def test_completion_validator_rejects_complete_without_cleanup_required(self) -> None:
+    def test_completion_validator_rejects_ready_for_cleanup_without_cleanup_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)
             (run_root / "state.json").write_text(
@@ -116,7 +215,10 @@ class ValidatorsTest(unittest.TestCase):
                     {
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
-                        "status": "complete",
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "Updated parser handling.",
                         "files_changed": ["src/app.py"],
                         "verification_command": "pytest -q",
@@ -158,7 +260,10 @@ class ValidatorsTest(unittest.TestCase):
                     {
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
-                        "status": "complete",
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "Updated parser handling.",
                         "files_changed": ["src/app.py", "src/util.py"],
                         "verification_command": "pytest -q",
@@ -192,7 +297,7 @@ class ValidatorsTest(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("scope_checked_covers_files_changed", {item["name"] for item in report["failures"]})
 
-    def test_completion_validator_accepts_complete_with_approved_review(self) -> None:
+    def test_completion_validator_rejects_wrong_cleanup_state_in_certification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)
             (run_root / "state.json").write_text(
@@ -200,7 +305,10 @@ class ValidatorsTest(unittest.TestCase):
                     {
                         "goal": "Fix it.",
                         "success_criteria": ["It works."],
-                        "status": "complete",
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
                         "worker_claim": "Updated parser handling.",
                         "files_changed": ["src/app.py"],
                         "verification_command": "pytest -q",
@@ -217,6 +325,17 @@ class ValidatorsTest(unittest.TestCase):
                         "owner": "watcher",
                         "next_action": "complete",
                         "cleanup_required": True,
+                        "certification_hash": "abc123",
+                        "certification": {
+                            "completion": {
+                                "status": "ok",
+                                "cleanup_state": "complete",
+                                "certified_at": "2026-05-01T00:01:30Z",
+                                "task_id": "task-001",
+                                "review_verdict": "approve",
+                                "files_changed": ["src/app.py"],
+                            }
+                        },
                         "plan_path": "docs/plan.md",
                         "spec_path": "docs/spec.md",
                         "updated_at": "2026-05-01T00:01:00Z",
@@ -231,7 +350,168 @@ class ValidatorsTest(unittest.TestCase):
                 encoding="utf-8",
             )
             report = validate_completion(run_root)
+            self.assertFalse(report["passed"])
+            self.assertIn(
+                "completion_certification_cleanup_state_ready_for_cleanup",
+                {item["name"] for item in report["failures"]},
+            )
+
+    def test_completion_validator_rejects_missing_cleanup_ready_state_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "goal": "Fix it.",
+                        "success_criteria": ["It works."],
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                        "worker_claim": "Updated parser handling.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed: 1 passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {
+                            "verdict": "approve",
+                            "scope_checked": ["src/app.py"],
+                            "problems": [],
+                            "required_rework": [],
+                            "acceptance_basis": ["verification passed freshly"],
+                        },
+                        "reviewed_at": "2026-05-01T00:01:00Z",
+                        "owner": "watcher",
+                        "next_action": "complete",
+                        "cleanup_required": True,
+                        "certification_hash": "wrong-hash",
+                        "certification": {
+                            "completion": {
+                                "status": "ok",
+                                "cleanup_state": "ready_for_cleanup",
+                                "certified_at": "2026-05-01T00:01:30Z",
+                                "task_id": "task-001",
+                                "review_verdict": "approve",
+                                "files_changed": ["src/app.py"],
+                            }
+                        },
+                        "plan_path": "docs/plan.md",
+                        "spec_path": "docs/spec.md",
+                        "updated_at": "2026-05-01T00:01:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated parser handling.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+            report = validate_completion(run_root)
+            self.assertFalse(report["passed"])
+            self.assertIn("completion_certification_cleanup_ready_state_hash_present", {item["name"] for item in report["failures"]})
+
+    def test_completion_validator_rejects_mismatched_certification_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "goal": "Fix it.",
+                        "success_criteria": ["It works."],
+                        "status": "ready_for_cleanup",
+                        "task_id": "task-001",
+                        "task_title": "Fix parser handling",
+                        "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                        "worker_claim": "Updated parser handling.",
+                        "files_changed": ["src/app.py"],
+                        "verification_command": "pytest -q",
+                        "verification_result": "passed: 1 passed",
+                        "submitted_at": "2026-05-01T00:00:00Z",
+                        "review": {
+                            "verdict": "approve",
+                            "scope_checked": ["src/app.py"],
+                            "problems": [],
+                            "required_rework": [],
+                            "acceptance_basis": ["verification passed freshly"],
+                        },
+                        "reviewed_at": "2026-05-01T00:01:00Z",
+                        "owner": "watcher",
+                        "next_action": "complete",
+                        "cleanup_required": True,
+                        "certification_hash": "wrong-hash",
+                        "certification": {
+                            "completion": {
+                                "status": "ok",
+                                "cleanup_state": "ready_for_cleanup",
+                                "certified_at": "2026-05-01T00:01:30Z",
+                                "task_id": "task-001",
+                                "review_verdict": "approve",
+                                "files_changed": ["src/app.py"],
+                            }
+                        },
+                        "plan_path": "docs/plan.md",
+                        "spec_path": "docs/spec.md",
+                        "updated_at": "2026-05-01T00:01:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated parser handling.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+            report = validate_completion(run_root)
+            self.assertFalse(report["passed"])
+            self.assertIn("completion_certification_hash_matches", {item["name"] for item in report["failures"]})
+
+    def test_completion_validator_accepts_ready_for_cleanup_from_authoritative_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = {
+                "goal": "Fix it.",
+                "success_criteria": ["It works."],
+                "status": "ready_for_cleanup",
+                "task_id": "task-001",
+                "task_title": "Fix parser handling",
+                "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                "worker_claim": "Updated parser handling.",
+                "files_changed": ["src/app.py"],
+                "verification_command": "pytest -q",
+                "verification_result": "passed: 1 passed",
+                "submitted_at": "2026-05-01T00:00:00Z",
+                "review": {
+                    "verdict": "approve",
+                    "scope_checked": ["src/app.py"],
+                    "problems": [],
+                    "required_rework": [],
+                    "acceptance_basis": ["verification passed freshly"],
+                },
+                "reviewed_at": "2026-05-01T00:01:00Z",
+                "owner": "watcher",
+                "next_action": "complete",
+                "cleanup_required": True,
+                "plan_path": "docs/plan.md",
+                "spec_path": "docs/spec.md",
+                "updated_at": "2026-05-01T00:01:00Z",
+            }
+            state.update(self.completion_certification(state))
+            (run_root / "state.json").write_text(
+                json.dumps(state),
+                encoding="utf-8",
+            )
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated parser handling.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+            report = validate_completion(run_root)
             self.assertTrue(report["passed"])
+            self.assertEqual(report["warnings"], [])
 
 
 if __name__ == "__main__":

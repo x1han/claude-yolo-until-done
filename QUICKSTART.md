@@ -1,49 +1,55 @@
 # Quickstart
 
-This is the shortest practical path for using `claude-yolo-until-done` as a lightweight worker+watcher loop.
+This is shortest practical path for using `claude-yolo-until-done` as grill-storm planning flow plus lightweight worker+watcher loop.
 
-## 1. Finish Planning First
+## 1. Initialize Grill-Storm Docs
 
-Do not start here unless `superpowers` has already produced:
+From target project root:
 
-- an approved spec
-- an approved implementation plan
+```bash
+python <skill-repo>/workflow/init_grill_docs.py \
+  --project-dir <output-folder> \
+  --request "Describe work to plan."
+```
 
-This workflow is execution-only.
+That creates `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md`.
 
-## 2. Choose The Output Folder
+## 2. Finish Planning First
 
-The output folder defaults to the current working directory.
+Do not start execution until grill-storm loop has produced:
 
-`.yolo/` lives inside that output folder. If you want a different location, choose that folder first and run the workflow there, or pass explicit paths that point into it.
+- approved spec
+- approved implementation plan
 
-## 3. Bootstrap The Run Root
+This workflow still keeps execution and planning separate.
 
-From the output folder:
+## 3. Bootstrap Run Root
+
+From output folder:
 
 ```bash
 python <skill-repo>/workflow/bootstrap.py \
-  --spec <output-folder>/docs/superpowers/specs/approved-spec.md \
-  --plan <output-folder>/docs/superpowers/plans/approved-plan.md \
+  --spec <output-folder>/docs/spec.md \
+  --plan <output-folder>/docs/plan.md \
   --run-root <output-folder>/.yolo \
-  --goal "Fix the requested problem and verify it." \
-  --success-criterion "The requested files are updated exactly as required." \
-  --success-criterion "The verification command passes freshly." \
-  --success-criterion "The workflow reaches valid completion."
+  --goal "Fix requested problem and verify it." \
+  --success-criterion "Requested files are updated exactly as required." \
+  --success-criterion "Verification command passes freshly." \
+  --success-criterion "Workflow reaches valid completion."
 ```
 
 ## 4. Run Preflight On Skill Load
 
-When the skill is loaded, run preflight first:
+When skill is loaded, run preflight first:
 
-- verify the approved spec and plan paths exist
-- classify the run as new-run or continue-run
-- bootstrap `.yolo/state.json` and `.yolo/trace.md` when the run is new
-- verify `.yolo/state.json` and `.yolo/trace.md` only when the run is a continue-run
-- install the current local claude-yolo hook set without treating legacy same-run hook groups as a blocker
-- offer a narrow repair path before ordinary execution continues
+- verify approved spec and plan paths exist
+- classify run as new-run or continue-run
+- bootstrap `.yolo/state.json` and `.yolo/trace.md` when run is new
+- verify `.yolo/state.json` and `.yolo/trace.md` only when run is continue-run
+- install current local claude-yolo hook set without treating legacy same-run hook groups as blocker
+- offer narrow repair path before ordinary execution continues
 
-The output should stay brief, but the checks should be strict.
+Output should stay brief, but checks should be strict.
 
 ## 5. Install Project-Local Hooks
 
@@ -53,7 +59,7 @@ python <skill-repo>/workflow/install_claude_hooks.py \
   --run-root .yolo
 ```
 
-This writes `.claude/settings.local.json` in the output folder.
+This writes `.claude/settings.local.json` in output folder.
 
 ## 6. Launch Claude Code Correctly
 
@@ -61,23 +67,23 @@ This writes `.claude/settings.local.json` in the output folder.
 claude --dangerously-skip-permissions
 ```
 
-Without that flag, this workflow should fail closed.
+Without that flag, workflow should fail closed.
 
-Do not start claude-yolo from headless `claude -p` print mode. The workflow depends on interactive stop/resume behavior that current print mode does not preserve.
+Do not start claude-yolo from headless `claude -p` print mode. Workflow depends on interactive stop/resume behavior that current print mode does not preserve.
 
-## 7. Continue The Workflow
+## 7. Continue Workflow
 
-Inside Claude Code, the normal usage is simple: use `claude-yolo-until-done` to execute the approved plan.
+Inside Claude Code, normal usage is simple: use `claude-yolo-until-done` to execute approved plan.
 
-If needed, also name the exact spec path, plan path, or output folder, but no extra execution skill should be required.
+If needed, also name exact spec path, plan path, or output folder, but no extra execution skill should be required.
 
-Keep the session aligned with the durable run state:
+Keep session aligned with durable run state:
 
 - activate `claude-yolo-until-done`
 - run preflight first
 - reload `<run-root>/state.json`, usually `.yolo/state.json`
 - follow `status`, `owner`, and `next_action`
-- keep updating the run root after material steps
+- keep updating run root after material steps
 
 Useful commands:
 
@@ -92,12 +98,12 @@ python <skill-repo>/hooks/run_gate.py --validator submission --run-root <output-
 python <skill-repo>/hooks/run_gate.py --validator completion --run-root <output-folder>/.yolo
 ```
 
-## 8. Let The Hooks Guard The Session
+## 8. Let Hooks Guard Session
 
-The installed hooks do three things:
+Installed hooks do three things:
 
 - `SessionStart`: restore workflow context after startup, resume, or compaction
-- `Stop`: block early stopping while the workflow is incomplete or cleanup is still required
+- `Stop`: block early stopping while workflow is incomplete or cleanup is still required
 - `UserPromptSubmit`: force exactly one choice while claude-yolo remains mounted — 暂停, 取消, or 继续 yolo
 
 ## Daily Checklist

@@ -103,6 +103,64 @@ class ChecklistBootstrapTest(unittest.TestCase):
 
 
 class PreflightTest(unittest.TestCase):
+    def runtime_env(
+        self,
+        project_dir: Path,
+        process_chain: str = "123 claude --dangerously-skip-permissions",
+    ) -> dict[str, str]:
+        env = dict(os.environ)
+        env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
+        env.pop("CLAUDE_YOLO_PROCESS_CHAIN", None)
+        bin_dir = project_dir / ".test-bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        ps_path = bin_dir / "ps"
+        ps_path.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('  PID  PPID ARGS')\n"
+            f"print({'123 1 ' + process_chain!r})\n",
+            encoding="utf-8",
+        )
+        ps_path.chmod(0o755)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        return env
+
+    def run_preflight(
+        self,
+        project_dir: Path,
+        spec_path: Path,
+        plan_path: Path,
+        *,
+        goal: str,
+        success_criteria: list[str] | None = None,
+        extra_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        command = [
+            sys.executable,
+            str(PREFLIGHT_PATH),
+            "--project-dir",
+            str(project_dir),
+            "--spec",
+            str(spec_path),
+            "--plan",
+            str(plan_path),
+            "--run-root",
+            ".yolo",
+            "--goal",
+            goal,
+        ]
+        for criterion in success_criteria or []:
+            command.extend(["--success-criterion", criterion])
+        command.extend(extra_args or [])
+        return subprocess.run(
+            command,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=self.runtime_env(project_dir) if env is None else env,
+        )
+
     def test_preflight_bootstraps_new_run_and_replaces_legacy_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -160,9 +218,7 @@ class PreflightTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+            env = self.runtime_env(project_dir)
 
             result = subprocess.run(
                 [
@@ -202,6 +258,140 @@ class PreflightTest(unittest.TestCase):
             self.assertNotIn("SessionEnd", settings["hooks"])
             self.assertIn(".yolo", settings["claudeYoloUntilDone"]["runs"])
 
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertTrue(state["hook_config_hash"])
+            self.assertEqual(state["state_version"], 2)
+            self.assertEqual(state["last_transition_actor"], "preflight")
+            self.assertEqual(state["last_transition_id"], "preflight:persist_hook_config_hash:2")
+
+    def test_preflight_defaults_new_run_to_acyclic_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Run once by default.",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["mode"], "acyclic")
+            self.assertEqual(
+                state["loop"],
+                {
+                    "enabled": False,
+                    "iteration": 1,
+                    "max_iterations": None,
+                    "stop_on_convergence": False,
+                    "converged": False,
+                    "stop_reason": "",
+                },
+            )
+
+    def test_preflight_persists_loop_policy_for_new_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Run repeatedly until stop policy fires.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "10", "--loop-stop-on-convergence"],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["mode"], "loop")
+            self.assertEqual(payload["loop"]["max_iterations"], 10)
+            self.assertTrue(payload["loop"]["stop_on_convergence"])
+            self.assertEqual(state["mode"], "loop")
+            self.assertEqual(state["loop"]["iteration"], 1)
+            self.assertEqual(state["loop"]["max_iterations"], 10)
+            self.assertTrue(state["loop"]["stop_on_convergence"])
+            self.assertEqual(state["loop"]["stop_reason"], "")
+
+    def test_preflight_rejects_loop_policy_when_mode_is_acyclic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Invalid acyclic args.",
+                extra_args=["--loop-max-iterations", "10"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Loop stop policy is only valid when mode is loop", result.stderr)
+
+    def test_preflight_rejects_continue_run_when_mode_mismatches_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            first = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Create loop bundle.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "2"],
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            second = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Try wrong mode.",
+                extra_args=["--mode", "acyclic"],
+            )
+
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("Continue-run mismatch: --mode does not match existing run bundle", second.stderr)
+
+    def test_preflight_rejects_continue_run_when_loop_policy_mismatches_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            first = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Create loop bundle.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "2"],
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            second = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Try wrong loop policy.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "3"],
+            )
+
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("Continue-run mismatch: loop policy does not match existing run bundle", second.stderr)
+
     def test_preflight_classifies_continue_run_when_bundle_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -211,31 +401,16 @@ class PreflightTest(unittest.TestCase):
             spec_path.write_text("# Spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
 
-            bootstrap = subprocess.run(
-                [
-                    sys.executable,
-                    str(BOOTSTRAP_PATH),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    str(run_root),
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
             )
-            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+            env = self.runtime_env(project_dir)
 
             result = subprocess.run(
                 [
@@ -267,7 +442,7 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(payload["action"], "validated_and_installed")
             self.assertEqual(payload["state_status"], "active")
 
-    def test_preflight_rejects_continue_run_without_checklist_artifact(self) -> None:
+    def test_preflight_classifies_continue_run_from_state_when_trace_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -276,107 +451,17 @@ class PreflightTest(unittest.TestCase):
             spec_path.write_text("# Spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
 
-            bootstrap = subprocess.run(
-                [
-                    sys.executable,
-                    str(BOOTSTRAP_PATH),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    str(run_root),
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
             )
-            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
-            (run_root / "watcher_checklist.json").unlink(missing_ok=True)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            (run_root / "trace.md").unlink(missing_ok=True)
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(PREFLIGHT_PATH),
-                    "--project-dir",
-                    str(project_dir),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    ".yolo",
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("watcher_checklist.json", result.stderr)
-
-    def test_preflight_validates_continue_run_against_current_checklist_task(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_dir = Path(tmp)
-            spec_path = project_dir / "spec.md"
-            plan_path = project_dir / "plan.md"
-            run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
-                encoding="utf-8",
-            )
-
-            bootstrap = subprocess.run(
-                [
-                    sys.executable,
-                    str(BOOTSTRAP_PATH),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    str(run_root),
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
-
-            checklist_path = run_root / "watcher_checklist.json"
-            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
-            second_task = checklist["tasks"][1]
-            state_path = run_root / "state.json"
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            state["task_id"] = second_task["task_id"]
-            state["task_title"] = second_task["task_title"]
-            state["task_inputs"] = second_task
-            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+            env = self.runtime_env(project_dir)
 
             result = subprocess.run(
                 [
@@ -407,6 +492,376 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(payload["classification"], "continue_run")
             self.assertEqual(payload["action"], "validated_and_installed")
 
+    def test_continue_run_rebuilds_missing_checklist_from_authoritative_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            checklist_path = run_root / "watcher_checklist.json"
+            checklist_path.unlink(missing_ok=True)
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(rebuilt["current_task"]["task_id"], state["task_id"])
+            self.assertEqual(rebuilt["current_task"]["task_title"], state["task_title"])
+            self.assertEqual(rebuilt["current_task"]["task_inputs"], state["task_inputs"])
+
+    def test_continue_run_rebuilds_stale_checklist_from_authoritative_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            checklist_path = run_root / "watcher_checklist.json"
+            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+            checklist["current_task"] = {"task_id": "task-999", "task_title": "stale", "task_inputs": {"task_id": "task-999"}}
+            checklist["tasks"][0]["task_title"] = "stale"
+            checklist_path.write_text(json.dumps(checklist, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(rebuilt["current_task"]["task_id"], state["task_id"])
+            self.assertEqual(rebuilt["current_task"]["task_title"], state["task_title"])
+            self.assertEqual(rebuilt["current_task"]["task_inputs"], state["task_inputs"])
+            self.assertEqual(rebuilt["tasks"][0], state["task_inputs"])
+
+    def test_preflight_validates_continue_run_against_current_checklist_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            checklist_path = run_root / "watcher_checklist.json"
+            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+            second_task = checklist["tasks"][1]
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["task_id"] = second_task["task_id"]
+            state["task_title"] = second_task["task_title"]
+            state["task_inputs"] = second_task
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "continue_run")
+            self.assertEqual(payload["action"], "validated_and_installed")
+
+            rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
+            persisted_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(rebuilt["current_task"]["task_id"], second_task["task_id"])
+            self.assertEqual(rebuilt["current_task"]["task_title"], second_task["task_title"])
+            self.assertEqual(rebuilt["tasks"][0], second_task)
+            self.assertEqual(persisted_state["task_id"], second_task["task_id"])
+
+    def test_preflight_rejects_inconsistent_authoritative_task_state_before_rebuilding_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            checklist_path = run_root / "watcher_checklist.json"
+            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+            second_task = checklist["tasks"][1]
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["task_id"] = second_task["task_id"]
+            state["task_title"] = second_task["task_title"]
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+            checklist_path.unlink(missing_ok=True)
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("state task_id does not match task_inputs.task_id", result.stderr)
+            self.assertFalse(checklist_path.exists())
+
+    def test_preflight_rejects_continue_run_when_authoritative_task_fields_are_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["task_id"] = ""
+            state["task_inputs"]["task_id"] = ""
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing non-empty task_id", result.stderr)
+
+    def test_continue_run_rebuilds_checklist_when_extra_stale_tasks_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            checklist_path = run_root / "watcher_checklist.json"
+            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            checklist["current_task"] = {
+                "task_id": state["task_id"],
+                "task_title": state["task_title"],
+                "task_inputs": state["task_inputs"],
+            }
+            checklist["tasks"][0] = state["task_inputs"]
+            checklist["tasks"].append(
+                {
+                    "task_id": "task-999",
+                    "task_title": "stale extra task",
+                    "plan_task_text": "### Task 999: stale extra task",
+                    "spec_excerpt": "# stale",
+                    "checklist_items": ["reject drift"],
+                }
+            )
+            checklist_path.write_text(json.dumps(checklist, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            env = self.runtime_env(project_dir)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                    "--success-criterion",
+                    "bundle already exists.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(rebuilt["current_task"]["task_id"], state["task_id"])
+            self.assertEqual(rebuilt["tasks"], [state["task_inputs"]])
+
     def test_preflight_rejects_continue_run_when_spec_path_mismatches_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -418,31 +873,16 @@ class PreflightTest(unittest.TestCase):
             other_spec_path.write_text("# Other spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
 
-            bootstrap = subprocess.run(
-                [
-                    sys.executable,
-                    str(BOOTSTRAP_PATH),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    str(run_root),
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
             )
-            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+            env = self.runtime_env(project_dir)
 
             result = subprocess.run(
                 [
@@ -473,7 +913,7 @@ class PreflightTest(unittest.TestCase):
             self.assertIn("spec_path='spec.md'", result.stderr)
             self.assertIn("provided='other-spec.md'", result.stderr)
 
-    def test_preflight_rejects_mixed_run_bundle_state(self) -> None:
+    def test_preflight_rejects_trace_without_authoritative_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -482,11 +922,9 @@ class PreflightTest(unittest.TestCase):
             spec_path.write_text("# Spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
             run_root.mkdir(parents=True, exist_ok=True)
-            (run_root / "state.json").write_text("{}\n", encoding="utf-8")
+            (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+            env = self.runtime_env(project_dir)
 
             result = subprocess.run(
                 [
@@ -514,6 +952,220 @@ class PreflightTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("mixed run bundle state", result.stderr.lower())
+            self.assertIn("trace.md exists without authoritative state.json", result.stderr)
+
+    def test_continue_run_requeues_expired_dispatch_claim_after_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["requested_role"] = "watcher"
+            state["next_action"] = "watcher_review"
+            state["dispatch_status"] = "running"
+            state["dispatch_intent"] = {"role": "watcher", "action": "watcher_review"}
+            state["dispatch_claim"] = {
+                "owner": "worker-1",
+                "claimed_at": "2026-05-08T00:00:00+00:00",
+                "lease_expires_at": "2026-05-08T00:00:01+00:00",
+            }
+            state["last_dispatch"] = {
+                "role": "watcher",
+                "task_id": state["task_id"],
+                "gate_id": state["gate_id"],
+                "next_action": "watcher_review",
+                "dispatched_at": "2026-05-08T00:00:00+00:00",
+                "task_packet": {"plan_task_text": "### Task 1: Keep the run bundle consistent"},
+            }
+            state["state_version"] = 4
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            updated_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["classification"], "continue_run")
+            self.assertEqual(payload["dispatch_recovery"]["result"], "requeued")
+            self.assertEqual(payload["dispatch_recovery"]["role"], "watcher")
+            self.assertEqual(updated_state["state_version"], 5)
+            self.assertEqual(updated_state["last_transition_actor"], "preflight")
+
+            persisted = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["requested_role"], "watcher")
+            self.assertEqual(persisted["dispatch_status"], "pending")
+            self.assertEqual(persisted["dispatch_intent"], {"role": "watcher", "action": "watcher_review"})
+            self.assertEqual(persisted["dispatch_claim"], {})
+            self.assertEqual(persisted["last_dispatch"], {})
+            trace = (run_root / "trace.md").read_text(encoding="utf-8")
+            self.assertIn("preflight recovered expired dispatch claim", trace)
+
+    def test_preflight_rejects_continue_run_when_installed_hook_hash_drifted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            settings_path = project_dir / ".claude" / "settings.local.json"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            env = self.runtime_env(project_dir)
+
+            first_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(first_run.returncode, 0, first_run.stderr)
+
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings["hooks"]["Stop"][0]["hooks"][0]["command"] = "tampered-stop"
+            settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("hook_config_hash", result.stderr)
+
+    def test_preflight_rejects_continue_run_when_hook_config_hash_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            settings_path = project_dir / ".claude" / "settings.local.json"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            env = self.runtime_env(project_dir)
+
+            first_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(first_run.returncode, 0, first_run.stderr)
+
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["hook_config_hash"] = ""
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings.pop("hooks", None)
+            settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Resume an existing run.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing hook_config_hash", result.stderr)
 
     def test_preflight_rejects_runtime_without_skip_permissions_proof(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -523,9 +1175,7 @@ class PreflightTest(unittest.TestCase):
             spec_path.write_text("# Spec\n", encoding="utf-8")
             plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
 
-            env = dict(os.environ)
-            env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
-            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude"
+            env = self.runtime_env(project_dir, "123 claude")
 
             result = subprocess.run(
                 [
@@ -553,6 +1203,76 @@ class PreflightTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("dangerously-skip-permissions", result.stderr)
+
+    def test_preflight_rejects_spoofed_process_chain_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            env = self.runtime_env(project_dir, "123 claude")
+            env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Reject spoofed runtime proof.",
+                    "--success-criterion",
+                    "env override cannot fake permission proof.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("dangerously-skip-permissions", result.stderr)
+
+    def test_preflight_rejects_continue_run_when_state_version_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            initial = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state.pop("state_version")
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("state_version", result.stderr)
 
 
 if __name__ == "__main__":

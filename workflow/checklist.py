@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from state import build_current_task_view
+
 
 _TASK_HEADING_PATTERN = re.compile(r"^###\s+Task\s+\d+\s*:\s+(.*\S)\s*$")
 _TASK_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
@@ -63,4 +65,16 @@ def build_master_checklist(spec_path: Path, plan_path: Path) -> dict:
             }
             for index, (plan_task_text, task_title) in enumerate(plan_tasks, start=1)
         ]
+    }
+
+
+def build_checklist_from_state(state: dict) -> dict:
+    current_task = build_current_task_view(state)
+    task_inputs = current_task.get("task_inputs")
+    if not isinstance(task_inputs, dict) or not task_inputs:
+        raise SystemExit("Continue-run state is missing task_inputs needed to rebuild watcher_checklist.json")
+
+    return {
+        "current_task": current_task,
+        "tasks": [task_inputs],
     }

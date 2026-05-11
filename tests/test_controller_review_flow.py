@@ -55,6 +55,7 @@ class ControllerReviewFlowTest(unittest.TestCase):
             "worker_request": "need_human",
             "worker_question": "Need product guidance.",
             "human_handoff": {"summary": "stale"},
+            "resume_target": {"role": "worker", "action": "worker_rework"},
             "gate_reason": "stale_handoff",
         }
 
@@ -62,14 +63,41 @@ class ControllerReviewFlowTest(unittest.TestCase):
 
         self.assertFalse(state["blocked_for_human"])
         self.assertEqual(state["human_handoff"], {})
+        self.assertEqual(state["resume_target"], {})
         self.assertEqual(state["owner"], "worker")
         self.assertEqual(state["next_action"], "worker_update")
         self.assertEqual(state["worker_request"], "need_helper")
         self.assertEqual(state["worker_question"], "Check validator scope.")
         self.assertEqual(state["requested_role"], "helper")
-        self.assertEqual(state["dispatch_status"], "idle")
+        self.assertEqual(state["dispatch_status"], "pending")
         self.assertEqual(state["last_dispatch"], {})
         self.assertEqual(state["gate_reason"], "")
+
+    def test_need_human_persists_resume_target_before_handoff(self) -> None:
+        state = {
+            "allow_need_human": True,
+            "owner": "worker",
+            "next_action": "worker_rework",
+            "requested_role": "worker",
+            "dispatch_status": "completed",
+            "last_dispatch": {"role": "worker"},
+            "blocked_for_human": False,
+            "worker_request": "",
+            "worker_question": "",
+            "human_handoff": {},
+            "resume_target": {},
+            "gate_reason": "worker_return_stop_block",
+        }
+
+        update_for_helper_request(state, "need_human", "Need product guidance.")
+
+        self.assertTrue(state["blocked_for_human"])
+        self.assertEqual(state["owner"], "human")
+        self.assertEqual(state["next_action"], "human_handoff")
+        self.assertEqual(state["requested_role"], "human")
+        self.assertEqual(state["resume_target"], {"role": "worker", "action": "worker_rework"})
+        self.assertEqual(state["worker_request"], "need_human")
+        self.assertEqual(state["worker_question"], "Need product guidance.")
 
     def test_worker_submit_then_watcher_reject_approve_and_complete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,6 +152,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "worker",
                     "--action",
                     "submit",
+                    "--expected-version",
+                    "1",
                     "--worker-claim",
                     "Implemented review flow.",
                     "--files-changed",
@@ -151,8 +181,12 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["verification_result"], "pass")
             self.assertTrue(state["submitted_at"])
             self.assertEqual(state["review"], {})
+            self.assertEqual(state["state_version"], 2)
+            self.assertEqual(state["last_transition_actor"], "worker")
+            self.assertEqual(state["last_transition_id"], "worker:submit:2")
             self.assertEqual(state["requested_role"], "watcher")
-            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "watcher:gate-task-001:1")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
             worker_complete = subprocess.run(
@@ -165,6 +199,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "worker",
                     "--action",
                     "complete",
+                    "--expected-version",
+                    "2",
                 ],
                 cwd=project_dir,
                 capture_output=True,
@@ -183,6 +219,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "watcher",
                     "--action",
                     "review",
+                    "--expected-version",
+                    "2",
                     "--verdict",
                     "rework_required",
                     "--scope-checked",
@@ -212,7 +250,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["review"]["acceptance_basis"], [])
             self.assertTrue(state["reviewed_at"])
             self.assertEqual(state["requested_role"], "worker")
-            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "worker:gate-task-001:2")
             self.assertEqual(state["last_dispatch"]["role"], "worker")
 
             resubmit = subprocess.run(
@@ -225,6 +264,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "worker",
                     "--action",
                     "submit",
+                    "--expected-version",
+                    "3",
                     "--worker-claim",
                     "Addressed watcher rework.",
                     "--files-changed",
@@ -247,7 +288,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["gate_id"], "gate-task-001")
             self.assertEqual(state["gate_attempt"], 0)
             self.assertEqual(state["requested_role"], "watcher")
-            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "watcher:gate-task-001:3")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
 
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
@@ -267,6 +309,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "watcher",
                     "--action",
                     "review",
+                    "--expected-version",
+                    "4",
                     "--verdict",
                     "approve",
                     "--scope-checked",
@@ -300,7 +344,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(state["requested_role"], "watcher")
-            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "watcher:gate-task-001:4")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
             self.assertFalse(state["blocked_for_human"])
             self.assertEqual(state["human_handoff"], {})
@@ -317,6 +362,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "watcher",
                     "--action",
                     "complete",
+                    "--expected-version",
+                    "5",
                 ],
                 cwd=project_dir,
                 capture_output=True,
@@ -326,7 +373,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(complete.returncode, 0, complete.stderr)
 
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(state["status"], "complete")
+            self.assertEqual(state["status"], "ready_for_cleanup")
+            self.assertNotEqual(state["status"], "complete")
             self.assertEqual(state["next_action"], "complete")
             self.assertEqual(state["owner"], "watcher")
             self.assertTrue(state["cleanup_required"])
@@ -391,6 +439,236 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertNotIn("Stop", settings.get("hooks", {}))
             self.assertNotIn("UserPromptSubmit", settings.get("hooks", {}))
 
+    def test_watcher_review_rejects_non_live_dispatch_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+
+            spec_path.write_text("# Spec\nReview flow stays within the same task gate.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n## Tasks\n1. Preserve gate identity during rework.\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(BOOTSTRAP_PATH),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    str(run_root),
+                    "--goal",
+                    "Ship reviewed workflow state transitions.",
+                    "--success-criterion",
+                    "worker submissions move the run into watcher review.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            submit = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "worker",
+                    "--action",
+                    "submit",
+                    "--expected-version",
+                    "1",
+                    "--worker-claim",
+                    "Implemented review flow.",
+                    "--files-changed",
+                    "workflow/controller.py",
+                    "--verification-command",
+                    "python -m unittest tests.test_controller_review_flow",
+                    "--verification-result",
+                    "pass",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit.returncode, 0, submit.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            state["dispatch_status"] = "completed"
+            state["dispatch_claim"] = {}
+            (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            review = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "watcher",
+                    "--action",
+                    "review",
+                    "--expected-version",
+                    "2",
+                    "--verdict",
+                    "approve",
+                    "--scope-checked",
+                    "workflow/controller.py",
+                    "--acceptance-basis",
+                    "Completion is now gated on approved review.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(review.returncode, 0)
+            self.assertIn("dispatch authority", review.stderr or review.stdout)
+
+    def test_worker_submit_rejects_stale_expected_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+
+            spec_path.write_text("# Spec\nReview flow stays within the same task gate.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n## Tasks\n1. Preserve gate identity during rework.\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(BOOTSTRAP_PATH),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    str(run_root),
+                    "--goal",
+                    "Ship reviewed workflow state transitions.",
+                    "--success-criterion",
+                    "worker submissions move the run into watcher review.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            submit = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "worker",
+                    "--action",
+                    "submit",
+                    "--expected-version",
+                    "0",
+                    "--worker-claim",
+                    "Implemented review flow.",
+                    "--files-changed",
+                    "workflow/controller.py",
+                    "--verification-command",
+                    "python -m unittest tests.test_controller_review_flow",
+                    "--verification-result",
+                    "pass",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(submit.returncode, 0)
+            self.assertIn("Stale state version", submit.stderr or submit.stdout)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "active")
+            self.assertEqual(state["state_version"], 1)
+            self.assertEqual(state["dispatch_status"], "pending")
+            self.assertEqual(state["last_dispatch"], {})
+            self.assertEqual(state["last_transition_actor"], "")
+            self.assertEqual(state["last_transition_id"], "")
+
+    def test_worker_submit_updates_state_version_and_dispatch_together(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+
+            spec_path.write_text("# Spec\nReview flow stays within the same task gate.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n## Tasks\n1. Preserve gate identity during rework.\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(BOOTSTRAP_PATH),
+                    "--spec",
+                    str(spec_path),
+                    "--plan",
+                    str(plan_path),
+                    "--run-root",
+                    str(run_root),
+                    "--goal",
+                    "Ship reviewed workflow state transitions.",
+                    "--success-criterion",
+                    "worker submissions move the run into watcher review.",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            submit = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "worker",
+                    "--action",
+                    "submit",
+                    "--expected-version",
+                    "1",
+                    "--worker-claim",
+                    "Implemented review flow.",
+                    "--files-changed",
+                    "workflow/controller.py",
+                    "workflow/state.py",
+                    "--verification-command",
+                    "python -m unittest tests.test_controller_review_flow",
+                    "--verification-result",
+                    "pass",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit.returncode, 0, submit.stderr)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["state_version"], 2)
+            self.assertEqual(state["last_transition_id"], "worker:submit:2")
+            self.assertEqual(state["requested_role"], "watcher")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "watcher:gate-task-001:1")
+            self.assertEqual(state["last_dispatch"]["role"], "watcher")
+
     def test_worker_submit_clears_stale_helper_and_human_routing_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -440,6 +718,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
                     "worker",
                     "--action",
                     "submit",
+                    "--expected-version",
+                    "1",
                     "--worker-claim",
                     "Implemented review flow.",
                     "--files-changed",
@@ -459,7 +739,8 @@ class ControllerReviewFlowTest(unittest.TestCase):
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["status"], "needs_review")
             self.assertEqual(state["requested_role"], "watcher")
-            self.assertEqual(state["dispatch_status"], "dispatched")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "watcher:gate-task-001:1")
             self.assertEqual(state["last_dispatch"]["role"], "watcher")
             self.assertFalse(state["blocked_for_human"])
             self.assertEqual(state["human_handoff"], {})

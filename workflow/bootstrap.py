@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from checklist import build_master_checklist
-from state import build_state, build_trace, write_json, write_text
+from state import build_state, build_trace, sync_current_task_view, write_json, write_text
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -31,6 +31,9 @@ def bootstrap_run(
     success_criteria: list[str],
     repo_root: Path,
     allow_need_human: bool | None = None,
+    mode: str = "acyclic",
+    loop_max_iterations: int | None = None,
+    loop_stop_on_convergence: bool = False,
 ) -> dict:
     fail_if_unsupported_headless_mode()
 
@@ -47,6 +50,9 @@ def bootstrap_run(
         plan_path=plan_path,
         spec_path=spec_path,
         repo_root=repo_root,
+        mode=mode,
+        loop_max_iterations=loop_max_iterations,
+        loop_stop_on_convergence=loop_stop_on_convergence,
     )
     if allow_need_human is False:
         state["allow_need_human"] = False
@@ -54,6 +60,7 @@ def bootstrap_run(
     first_task = checklist["tasks"][0]
     state["task_title"] = first_task["task_title"]
     state["task_inputs"] = dict(first_task)
+    sync_current_task_view(state)
     trace = build_trace(
         TEMPLATES_DIR / "trace-template.md",
         goal=goal,
@@ -93,17 +100,30 @@ def main() -> int:
         action="store_true",
         help="Disable worker need_human escalation for this run.",
     )
+    parser.add_argument("--mode", choices=("acyclic", "loop"), default="acyclic", help="Execution mode; defaults to acyclic")
+    parser.add_argument("--loop-max-iterations", type=int, default=None, help="Stop loop mode after this many iterations")
+    parser.add_argument(
+        "--loop-stop-on-convergence",
+        action="store_true",
+        help="Stop loop mode when convergence is reported",
+    )
     args = parser.parse_args()
 
-    summary = bootstrap_run(
-        spec_path=Path(args.spec),
-        plan_path=Path(args.plan),
-        run_root=Path(args.run_root),
-        goal=args.goal,
-        success_criteria=args.success_criteria,
-        repo_root=Path.cwd(),
-        allow_need_human=False if args.disallow_need_human else None,
-    )
+    try:
+        summary = bootstrap_run(
+            spec_path=Path(args.spec),
+            plan_path=Path(args.plan),
+            run_root=Path(args.run_root),
+            goal=args.goal,
+            success_criteria=args.success_criteria,
+            repo_root=Path.cwd(),
+            allow_need_human=False if args.disallow_need_human else None,
+            mode=args.mode,
+            loop_max_iterations=args.loop_max_iterations,
+            loop_stop_on_convergence=args.loop_stop_on_convergence,
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     print(json.dumps(summary, ensure_ascii=True))
     return 0
 

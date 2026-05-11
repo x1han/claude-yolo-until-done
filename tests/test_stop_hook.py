@@ -14,9 +14,32 @@ if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
 from claude_hook_bridge import session_start, stop
+from lifecycle import build_completion_certification, compute_certification_hash
 
 
 class StopHookTest(unittest.TestCase):
+    def completion_certification(self, state: dict | None = None) -> dict:
+        source_state = self.make_state(
+            status="ready_for_cleanup",
+            cleanup_required=True,
+            owner="watcher",
+            next_action="complete",
+            review={"verdict": "approve", "scope_checked": ["src/app.py"], "problems": [], "required_rework": [], "acceptance_basis": ["ok"]},
+            reviewed_at="2026-05-08T00:00:00+00:00",
+            worker_claim="Updated src/app.py.",
+            files_changed=["src/app.py"],
+            verification_command="python -m unittest",
+            verification_result="passed",
+            submitted_at="2026-05-08T00:00:00+00:00",
+        )
+        if state is not None:
+            source_state.update(state)
+        payload = build_completion_certification(source_state, "2026-05-08T00:00:00+00:00")
+        return {
+            "certification": {"completion": payload},
+            "certification_hash": compute_certification_hash(payload),
+        }
+
     def make_state(self, **overrides: object) -> dict:
         state = {
             "goal": "Fix it.",
@@ -34,10 +57,14 @@ class StopHookTest(unittest.TestCase):
             "next_action": "worker_update",
             "task_id": "task-001",
             "gate_id": "gate-task-001",
+            "state_version": 1,
             "gate_attempt": 0,
             "gate_max_attempts": 5,
             "requested_role": "worker",
             "dispatch_status": "idle",
+            "dispatch_intent": {},
+            "dispatch_claim": {},
+            "last_dispatch": {},
             "blocked_for_human": False,
             "plan_path": "docs/plan.md",
             "spec_path": "docs/spec.md",
@@ -83,7 +110,7 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertIsNone(payload)
 
-    def test_session_start_reports_missing_trace_via_hook_context(self) -> None:
+    def test_session_start_does_not_require_trace_when_state_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
@@ -94,7 +121,7 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertIn("hookSpecificOutput", payload)
         self.assertEqual(payload["hookSpecificOutput"]["hookEventName"], "SessionStart")
-        self.assertIn("trace.md is missing", payload["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("trace.md is missing", payload["hookSpecificOutput"]["additionalContext"])
 
     def test_session_start_reports_missing_required_fields_via_hook_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,28 +140,29 @@ class StopHookTest(unittest.TestCase):
             payload["hookSpecificOutput"]["additionalContext"],
         )
 
-    def test_session_start_reports_invalid_complete_bundle_via_hook_context(self) -> None:
+    def test_session_start_reports_missing_state_version_via_hook_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            broken_state = self.make_state()
+            broken_state.pop("state_version")
+            self.write_run_bundle(run_root, state=broken_state)
+
+            decision, payload = self.capture_session_start(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertIn("hookSpecificOutput", payload)
+        self.assertIn("state_version", payload["hookSpecificOutput"]["additionalContext"])
+
+    def test_session_start_reports_missing_persisted_completion_certification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
             self.write_run_bundle(
                 run_root,
                 state=self.make_state(
-                    status="complete",
-                    cleanup_required=False,
-                    worker_claim="Updated src/app.py.",
-                    files_changed=["src/app.py"],
-                    verification_command="pytest -q",
-                    verification_result="passed",
-                    submitted_at="2026-05-01T00:00:00Z",
-                    review={
-                        "verdict": "rework_required",
-                        "scope_checked": [],
-                        "problems": ["x"],
-                        "required_rework": ["y"],
-                        "acceptance_basis": [],
-                    },
-                    reviewed_at="2026-05-01T00:01:00Z",
+                    status="ready_for_cleanup",
+                    cleanup_required=True,
                     owner="watcher",
                     next_action="complete",
                 ),
@@ -144,7 +172,7 @@ class StopHookTest(unittest.TestCase):
 
         self.assertEqual(decision, 0)
         self.assertIn("hookSpecificOutput", payload)
-        self.assertIn("completion validation still fails", payload["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("completion certification", payload["hookSpecificOutput"]["additionalContext"])
 
     def test_stop_blocks_broken_run_root_even_with_stop_hook_active_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,11 +186,20 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(payload["decision"], "block")
         self.assertIn("state.json is missing", payload["reason"])
 
-    def test_stop_hook_active_flag_does_not_bypass_active_run_block(self) -> None:
+    def test_stop_hook_active_flag_does_not_bypass_pending_unclaimed_dispatch_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
-            self.write_run_bundle(run_root, state=self.make_state(status="active", gate_attempt=0))
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="active",
+                    gate_attempt=0,
+                    dispatch_status="pending",
+                    dispatch_intent={"role": "worker", "action": "worker_update"},
+                    dispatch_claim={},
+                ),
+            )
 
             decision, payload = self.capture_stop(project_dir, run_root, {"stop_hook_active": True})
             updated_state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
@@ -170,11 +207,121 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("Workflow status is active", payload["reason"])
-        self.assertEqual(payload["orchestration"]["result"], "dispatched")
-        self.assertEqual(payload["orchestration"]["role"], "worker")
-        self.assertEqual(updated_state["gate_attempt"], 1)
-        self.assertEqual(updated_state["dispatch_status"], "dispatched")
-        self.assertEqual(updated_state["last_dispatch"]["role"], "worker")
+        self.assertNotIn("orchestration", payload)
+        self.assertEqual(updated_state["gate_attempt"], 0)
+        self.assertEqual(updated_state["dispatch_status"], "pending")
+        self.assertEqual(updated_state["dispatch_intent"]["role"], "worker")
+
+    def test_stop_blocks_when_dispatch_intent_is_missing_for_active_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(status="active", dispatch_status="pending", dispatch_intent={}),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("dispatch_intent", payload["reason"])
+
+    def test_stop_blocks_when_dispatch_intent_fields_are_malformed_for_active_work(self) -> None:
+        cases = (
+            {"role": "", "action": "worker_update"},
+            {"role": "worker", "action": 123},
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            for dispatch_intent in cases:
+                self.write_run_bundle(
+                    run_root,
+                    state=self.make_state(
+                        status="active",
+                        dispatch_status="pending",
+                        dispatch_intent=dispatch_intent,
+                    ),
+                )
+
+                decision, payload = self.capture_stop(project_dir, run_root)
+
+                self.assertEqual(decision, 0)
+                self.assertEqual(payload["decision"], "block")
+                self.assertIn("dispatch_intent", payload["reason"])
+
+    def test_stop_blocks_when_live_dispatch_claim_still_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="active",
+                    dispatch_status="claimed",
+                    dispatch_intent={"role": "worker", "action": "worker_update"},
+                    dispatch_claim={
+                        "owner": "worker-1",
+                        "claimed_at": "2026-05-08T00:00:00+00:00",
+                        "lease_expires_at": "2999-01-01T00:00:00+00:00",
+                    },
+                ),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("live dispatch claim", payload["reason"])
+        self.assertNotIn("orchestration", payload)
+
+    def test_stop_blocks_when_claimed_dispatch_claim_shape_is_malformed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="active",
+                    dispatch_status="claimed",
+                    dispatch_intent={"role": "worker", "action": "worker_update"},
+                    dispatch_claim={"owner": "worker-1"},
+                ),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("dispatch_claim", payload["reason"])
+        self.assertIn("repaired", payload["reason"])
+
+    def test_stop_blocks_when_running_dispatch_lease_is_naive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="active",
+                    dispatch_status="running",
+                    dispatch_intent={"role": "worker", "action": "worker_update"},
+                    dispatch_claim={
+                        "owner": "worker-1",
+                        "claimed_at": "2026-05-08T00:00:00+00:00",
+                        "lease_expires_at": "2026-05-08T00:01:00",
+                    },
+                ),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("lease_expires_at", payload["reason"])
+        self.assertIn("repaired", payload["reason"])
 
     def test_stop_blocks_incomplete_workflow_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,7 +340,15 @@ class StopHookTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
-            self.write_run_bundle(run_root, state=self.make_state(gate_attempt=1, gate_max_attempts=3))
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    gate_attempt=1,
+                    gate_max_attempts=3,
+                    dispatch_status="completed",
+                    last_dispatch={"role": "worker", "task_id": "task-001"},
+                ),
+            )
 
             decision, payload = self.capture_stop(project_dir, run_root)
             updated_state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
@@ -205,6 +360,31 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(updated_state["gate_reason"], "worker_return_stop_block")
         self.assertFalse(updated_state["blocked_for_human"])
         self.assertEqual(updated_state["owner"], "worker")
+
+    def test_stop_persists_gate_attempt_with_new_state_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    state_version=7,
+                    gate_attempt=1,
+                    gate_max_attempts=3,
+                    dispatch_status="completed",
+                    last_dispatch={"role": "worker", "task_id": "task-001"},
+                ),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+            updated_state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("Worker return stop gate attempt 2/3", payload["reason"])
+        self.assertEqual(updated_state["gate_attempt"], 2)
+        self.assertEqual(updated_state["state_version"], 8)
+        self.assertEqual(updated_state["last_transition_actor"], "stop_hook")
 
     def test_stop_does_not_persist_gate_attempt_for_helper_watcher_or_human_states(self) -> None:
         cases = (
@@ -230,7 +410,16 @@ class StopHookTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
-            self.write_run_bundle(run_root, state=self.make_state(gate_attempt=4, gate_max_attempts=5))
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    gate_attempt=4,
+                    gate_max_attempts=5,
+                    next_action="worker_rework",
+                    dispatch_status="completed",
+                    last_dispatch={"role": "worker", "task_id": "task-001"},
+                ),
+            )
 
             decision, payload = self.capture_stop(project_dir, run_root)
             updated_state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
@@ -238,15 +427,21 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(decision, 0)
         self.assertEqual(payload["decision"], "block")
         self.assertIn("requires human handoff", payload["reason"])
-        self.assertEqual(payload["orchestration"]["result"], "dispatched")
-        self.assertEqual(payload["orchestration"]["role"], "human")
+        self.assertNotIn("orchestration", payload)
         self.assertEqual(updated_state["gate_attempt"], 5)
         self.assertTrue(updated_state["blocked_for_human"])
         self.assertEqual(updated_state["owner"], "human")
         self.assertEqual(updated_state["next_action"], "human_handoff")
         self.assertEqual(updated_state["requested_role"], "human")
-        self.assertEqual(updated_state["dispatch_status"], "dispatched")
-        self.assertEqual(updated_state["last_dispatch"]["role"], "human")
+        self.assertEqual(updated_state["dispatch_status"], "pending")
+        self.assertEqual(updated_state["dispatch_intent"]["role"], "human")
+        self.assertEqual(updated_state["resume_target"], {"role": "worker", "action": "worker_rework"})
+        self.assertEqual(updated_state["last_dispatch"], {})
+        self.assertEqual(updated_state["worker_request"], "need_human")
+        self.assertEqual(
+            updated_state["worker_question"],
+            "Stop gate limit reached; human guidance is required before the run can resume.",
+        )
         self.assertEqual(updated_state["human_handoff"], {"reason": "stop_gate_limit"})
 
     def test_stop_blocks_with_human_handoff_reason_after_limit_is_persisted(self) -> None:
@@ -301,6 +496,20 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(payload["decision"], "block")
         self.assertIn("missing required field 'requested_role'", payload["reason"])
 
+    def test_stop_blocks_when_active_state_is_missing_required_dispatch_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            broken_state = self.make_state(status="active")
+            broken_state.pop("dispatch_intent")
+            self.write_run_bundle(run_root, state=broken_state)
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("missing required dispatch field 'dispatch_intent'", payload["reason"])
+
     def test_stop_blocks_when_cleanup_is_still_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -325,6 +534,7 @@ class StopHookTest(unittest.TestCase):
                     reviewed_at="2026-05-01T00:01:00Z",
                     owner="watcher",
                     next_action="cleanup",
+                    **self.completion_certification(),
                 ),
             )
 
@@ -334,27 +544,15 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(payload["decision"], "block")
         self.assertIn("cleanup", payload["reason"])
 
-    def test_stop_blocks_invalid_complete_state(self) -> None:
+    def test_stop_blocks_ready_for_cleanup_without_persisted_completion_certification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             run_root = project_dir / ".yolo"
             self.write_run_bundle(
                 run_root,
                 state=self.make_state(
-                    status="complete",
-                    worker_claim="Updated src/app.py.",
-                    files_changed=["src/app.py"],
-                    verification_command="pytest -q",
-                    verification_result="passed: 1 passed",
-                    submitted_at="2026-05-01T00:00:00Z",
-                    review={
-                        "verdict": "rework_required",
-                        "scope_checked": [],
-                        "problems": ["x"],
-                        "required_rework": ["y"],
-                        "acceptance_basis": [],
-                    },
-                    reviewed_at="2026-05-01T00:01:00Z",
+                    status="ready_for_cleanup",
+                    cleanup_required=True,
                     owner="watcher",
                     next_action="complete",
                 ),
@@ -364,7 +562,103 @@ class StopHookTest(unittest.TestCase):
 
         self.assertEqual(decision, 0)
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("completion validation", payload["reason"])
+        self.assertIn("completion certification", payload["reason"])
+
+    def test_stop_blocks_complete_state_with_mismatched_completion_certification_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    owner="watcher",
+                    next_action="complete",
+                    certification={"completion": self.completion_certification()["certification"]["completion"]},
+                    certification_hash="wrong-hash",
+                ),
+                write_trace_file=False,
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("certification_hash", payload["reason"])
+
+    def test_stop_blocks_complete_state_without_cleanup_ready_state_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            certification = self.completion_certification()
+            certification["certification"]["completion"].pop("cleanup_ready_state_hash", None)
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    owner="watcher",
+                    next_action="complete",
+                    **certification,
+                ),
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("cleanup-ready state proof", payload["reason"])
+
+    def test_stop_blocks_complete_state_with_invalid_terminal_cleanup_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    owner="worker",
+                    next_action="worker_update",
+                    **self.completion_certification(
+                        {
+                            "status": "complete",
+                            "cleanup_required": False,
+                            "owner": "worker",
+                            "next_action": "worker_update",
+                        }
+                    ),
+                ),
+                write_trace_file=False,
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("terminal cleanup contract", payload["reason"])
+
+    def test_stop_allows_complete_state_with_persisted_completion_certification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    owner="watcher",
+                    next_action="complete",
+                    **self.completion_certification(),
+                ),
+                write_trace_file=False,
+            )
+
+            decision, payload = self.capture_stop(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        self.assertIsNone(payload)
 
 
 if __name__ == "__main__":

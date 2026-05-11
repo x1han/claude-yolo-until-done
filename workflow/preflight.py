@@ -8,9 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from bootstrap import bootstrap_run
-from hook_settings import install_hook_set
-from state import load_json, load_state, serialize_path, state_path, trace_path
+from bootstrap import bootstrap_run, fail_if_unsupported_headless_mode
+from checklist import build_checklist_from_state
+from hook_settings import install_hook_set, installed_hook_config_hash, load_json as load_settings_json
+from orchestrator import recover_dispatch_for_resume
+from state import append_trace_event, build_current_task_view, build_loop_state, load_json, load_state, serialize_path, state_path, trace_path, transition_state, write_json
+from validate_grill_docs import GrillDocsError, ensure_ready_for_execution
 
 
 ACTIVE_ENTRYPOINT = "cli"
@@ -18,9 +21,6 @@ HEADLESS_ENTRYPOINT = "print"
 
 
 def read_process_chain() -> str:
-    override = os.environ.get("CLAUDE_YOLO_PROCESS_CHAIN")
-    if override is not None:
-        return override
     try:
         result = subprocess.run(
             ["ps", "-o", "pid,ppid,args", "-p", str(os.getpid()), str(os.getppid())],
@@ -36,12 +36,8 @@ def read_process_chain() -> str:
 
 
 def verify_runtime() -> dict:
+    fail_if_unsupported_headless_mode()
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
-    if entrypoint == HEADLESS_ENTRYPOINT:
-        raise SystemExit(
-            "Unsupported headless claude -p runtime: Stop-hook blocking cannot keep an unfinished claude-yolo run alive in print mode. "
-            "Use an interactive Claude Code session instead."
-        )
     if entrypoint and entrypoint != ACTIVE_ENTRYPOINT:
         raise SystemExit(f"Unsupported Claude Code entrypoint: {entrypoint}")
 
@@ -58,25 +54,71 @@ def verify_runtime() -> dict:
 def classify_run(run_root: Path) -> str:
     has_state = state_path(run_root).exists()
     has_trace = trace_path(run_root).exists()
-    if has_state and has_trace:
+    if has_state:
         return "continue_run"
-    if not has_state and not has_trace:
-        return "new_run"
-    raise SystemExit("Mixed run bundle state detected; state.json and trace.md must either both exist or both be absent.")
+    if has_trace:
+        raise SystemExit("Mixed run bundle state detected; trace.md exists without authoritative state.json.")
+    return "new_run"
+
+
+def require_state_version(state: dict) -> int:
+    state_version = state.get("state_version")
+    if not isinstance(state_version, int) or state_version < 1:
+        raise SystemExit("Continue-run state is missing valid positive integer state_version.")
+    return state_version
+
+
+def validate_authoritative_task_state(state: dict) -> None:
+    require_state_version(state)
+    task_inputs = state.get("task_inputs")
+    if not isinstance(task_inputs, dict) or not task_inputs:
+        raise SystemExit("Continue-run state is missing task_inputs needed to validate watcher_checklist.json")
+
+    task_id = str(state.get("task_id", "")).strip()
+    task_title = str(state.get("task_title", "")).strip()
+    input_task_id = str(task_inputs.get("task_id", "")).strip()
+    input_task_title = str(task_inputs.get("task_title", "")).strip()
+
+    if not task_id:
+        raise SystemExit("Continue-run state is missing non-empty task_id needed to validate watcher_checklist.json")
+    if not task_title:
+        raise SystemExit("Continue-run state is missing non-empty task_title needed to validate watcher_checklist.json")
+    if not input_task_id:
+        raise SystemExit("Continue-run state is missing non-empty task_inputs.task_id needed to validate watcher_checklist.json")
+    if not input_task_title:
+        raise SystemExit("Continue-run state is missing non-empty task_inputs.task_title needed to validate watcher_checklist.json")
+    if task_id != input_task_id:
+        raise SystemExit("Continue-run mismatch: state task_id does not match task_inputs.task_id")
+    if task_title != input_task_title:
+        raise SystemExit("Continue-run mismatch: state task_title does not match task_inputs.task_title")
+
 
 
 def load_current_checklist_task(checklist_path: Path, state: dict) -> dict:
+    validate_authoritative_task_state(state)
+    expected_current_task = build_current_task_view(state)
+    expected_checklist = build_checklist_from_state(state)
+    if not checklist_path.exists():
+        write_json(checklist_path, expected_checklist)
+        return expected_current_task
+
     checklist = load_json(checklist_path)
-    tasks = checklist.get("tasks")
-    if not isinstance(tasks, list) or not tasks:
-        raise SystemExit(f"Invalid checklist artifact: {checklist_path}")
+    if checklist != expected_checklist:
+        write_json(checklist_path, expected_checklist)
+        return expected_current_task
 
-    current_task_id = state.get("task_id")
-    for task in tasks:
-        if isinstance(task, dict) and task.get("task_id") == current_task_id:
-            return task
+    return checklist.get("current_task", {})
 
-    raise SystemExit(f"Continue-run mismatch: could not find current task {current_task_id!r} in {checklist_path}")
+
+def validate_grill_storm_bundle_if_present(project_dir: Path, spec_path: Path, plan_path: Path) -> None:
+    docs_root = (project_dir / "docs").resolve()
+    if spec_path != (docs_root / "spec.md").resolve() or plan_path != (docs_root / "plan.md").resolve():
+        return
+    try:
+        ensure_ready_for_execution(project_dir, "docs")
+    except GrillDocsError as error:
+        raise SystemExit(f"grill-storm planning docs are not execution-ready: {error}") from error
+
 
 
 def validate_continue_run_paths(state: dict, project_dir: Path, spec_path: Path, plan_path: Path) -> None:
@@ -96,6 +138,66 @@ def validate_continue_run_paths(state: dict, project_dir: Path, spec_path: Path,
         )
 
 
+
+def validate_continue_run_mode(state: dict, requested_mode: str, requested_loop: dict) -> None:
+    existing_mode = str(state.get("mode", "acyclic")).strip() or "acyclic"
+    if existing_mode != requested_mode:
+        raise SystemExit(
+            "Continue-run mismatch: --mode does not match existing run bundle "
+            f"(state mode={existing_mode!r}, provided={requested_mode!r})"
+        )
+
+    existing_loop = state.get("loop")
+    if not isinstance(existing_loop, dict):
+        existing_loop = build_loop_state("acyclic") if existing_mode == "acyclic" else {}
+    comparable_existing = {
+        "enabled": existing_loop.get("enabled"),
+        "max_iterations": existing_loop.get("max_iterations"),
+        "stop_on_convergence": existing_loop.get("stop_on_convergence"),
+    }
+    comparable_requested = {
+        "enabled": requested_loop.get("enabled"),
+        "max_iterations": requested_loop.get("max_iterations"),
+        "stop_on_convergence": requested_loop.get("stop_on_convergence"),
+    }
+    if comparable_existing != comparable_requested:
+        raise SystemExit(
+            "Continue-run mismatch: loop policy does not match existing run bundle "
+            f"(state loop={comparable_existing!r}, provided={comparable_requested!r})"
+        )
+
+
+
+def persist_hook_config_hash(run_root: Path, hook_hash: str, state: dict | None = None) -> dict:
+    current_state = load_state(run_root) if state is None else state
+    if str(current_state.get("hook_config_hash", "")).strip() == hook_hash:
+        return current_state
+
+    def apply_transition(authoritative_state: dict, _: str) -> None:
+        authoritative_state["hook_config_hash"] = hook_hash
+
+    return transition_state(
+        run_root,
+        actor="preflight",
+        action="persist_hook_config_hash",
+        expected_version=require_state_version(current_state),
+        apply_transition=apply_transition,
+    )
+
+
+
+def validate_installed_hook_config(settings_path: Path, run_root_arg: str, state: dict) -> None:
+    settings = load_settings_json(settings_path)
+    expected_hash = str(state.get("hook_config_hash", "")).strip()
+    if not expected_hash:
+        raise SystemExit("Continue-run state is missing hook_config_hash; hook integrity cannot be verified.")
+    actual_hash = installed_hook_config_hash(settings, run_root_arg)
+    if actual_hash != expected_hash:
+        raise SystemExit(
+            "Continue-run hook_config_hash mismatch: installed hooks for this run root no longer match state.json."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Classify and prepare a claude-yolo-until-done run before execution.")
     parser.add_argument("--project-dir", required=True, help="Target project directory")
@@ -111,7 +213,18 @@ def main() -> int:
         default=[],
         help="Success criterion for this run; repeat to provide multiple entries",
     )
+    parser.add_argument("--mode", choices=("acyclic", "loop"), default="acyclic", help="Execution mode; defaults to acyclic")
+    parser.add_argument("--loop-max-iterations", type=int, default=None, help="Stop loop mode after this many iterations")
+    parser.add_argument(
+        "--loop-stop-on-convergence",
+        action="store_true",
+        help="Stop loop mode when convergence is reported",
+    )
     args = parser.parse_args()
+    try:
+        requested_loop = build_loop_state(args.mode, args.loop_max_iterations, args.loop_stop_on_convergence)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
     project_dir = Path(args.project_dir).resolve()
     spec_path = Path(args.spec).resolve()
@@ -125,6 +238,7 @@ def main() -> int:
         raise SystemExit(f"Spec not found: {spec_path}")
     if not plan_path.exists():
         raise SystemExit(f"Plan not found: {plan_path}")
+    validate_grill_storm_bundle_if_present(project_dir, spec_path, plan_path)
 
     runtime = verify_runtime()
     classification = classify_run(run_root)
@@ -137,8 +251,12 @@ def main() -> int:
             goal=args.goal,
             success_criteria=args.success_criteria,
             repo_root=project_dir,
+            mode=args.mode,
+            loop_max_iterations=args.loop_max_iterations,
+            loop_stop_on_convergence=args.loop_stop_on_convergence,
         )
-        install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
+        settings = install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
+        persist_hook_config_hash(run_root, installed_hook_config_hash(settings, args.run_root))
         payload = {
             "classification": classification,
             "action": "bootstrapped_and_installed",
@@ -147,26 +265,49 @@ def main() -> int:
             "trace_path": bootstrap_summary["trace_path"],
             "checklist_path": bootstrap_summary["checklist_path"],
             "runtime_entrypoint": runtime["entrypoint"],
+            "mode": args.mode,
+            "loop": requested_loop,
         }
         print(json.dumps(payload, ensure_ascii=True))
         return 0
 
     checklist_path = run_root / "watcher_checklist.json"
-    if not checklist_path.exists():
-        raise SystemExit(f"Missing checklist artifact: {checklist_path}")
-
     state = load_state(run_root)
+    expected_version = require_state_version(state)
     validate_continue_run_paths(state, project_dir, spec_path, plan_path)
+    validate_continue_run_mode(state, args.mode, requested_loop)
+    validate_installed_hook_config(settings_path, args.run_root, state)
     current_checklist_task = load_current_checklist_task(checklist_path, state)
-    if state.get("task_title") != current_checklist_task.get("task_title"):
+    if build_current_task_view(state) != current_checklist_task:
         raise SystemExit(
-            f"Continue-run mismatch: state task_title does not match current task in {checklist_path}"
+            f"Continue-run mismatch: state current task does not match current task in {checklist_path}"
         )
-    if state.get("task_inputs") != current_checklist_task:
-        raise SystemExit(
-            f"Continue-run mismatch: state task_inputs do not match current task in {checklist_path}"
+    settings = install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
+    installed_hook_hash = installed_hook_config_hash(settings, args.run_root)
+    dispatch_recovery: dict[str, object] = {"result": "unchanged", "reason": "no continue-run mutation needed"}
+    hook_hash_changed = str(state.get("hook_config_hash", "")).strip() != installed_hook_hash
+    needs_dispatch_recovery = recover_dispatch_for_resume(dict(state)).get("result") != "unchanged"
+    if hook_hash_changed or needs_dispatch_recovery:
+        def apply_transition(current_state: dict, timestamp: str) -> None:
+            nonlocal dispatch_recovery
+            if hook_hash_changed:
+                current_state["hook_config_hash"] = installed_hook_hash
+            dispatch_recovery = recover_dispatch_for_resume(current_state, now=timestamp)
+
+        state = transition_state(
+            run_root,
+            actor="preflight",
+            action="continue_run_recovery",
+            expected_version=expected_version,
+            apply_transition=apply_transition,
         )
-    install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
+    if dispatch_recovery["result"] != "unchanged":
+        append_trace_event(
+            run_root,
+            f"preflight recovered expired dispatch claim: result={dispatch_recovery['result']}; "
+            f"owner={dispatch_recovery.get('expired_owner', '')}; role={dispatch_recovery.get('role', '')}; "
+            f"action={dispatch_recovery.get('action', '')}",
+        )
     payload = {
         "classification": classification,
         "action": "validated_and_installed",
@@ -175,6 +316,7 @@ def main() -> int:
         "owner": state.get("owner"),
         "next_action": state.get("next_action"),
         "runtime_entrypoint": runtime["entrypoint"],
+        "dispatch_recovery": dispatch_recovery,
     }
     print(json.dumps(payload, ensure_ascii=True))
     return 0

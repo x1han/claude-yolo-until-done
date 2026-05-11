@@ -1,45 +1,48 @@
 ---
 name: claude-yolo-until-done
-description: Use when running Claude Code with hooks and an existing approved spec and plan, and the agent must keep fixing, verifying, and continuing through a lightweight worker/watcher workflow until valid completion.
+description: Use when turning vague request into stable grill-storm docs and then running Claude Code with hooks through lightweight worker/watcher workflow until valid completion.
 ---
 # Claude YOLO Until Done
 
 ## Overview
-This is a Claude Code only execution workflow for high-autonomy fix, verify, and continue loops.
+This is Claude Code only workflow for grill-storm planning and high-autonomy fix, verify, and continue loops.
 
-Core rule: this skill does not create plans. It may run only after `superpowers` has already produced an approved spec and implementation plan.
+Core rule: first converge on approved spec and implementation plan through local docs, then execute approved plan through lightweight runtime.
 
-Normal usage is simple: after `superpowers` finishes planning, use `claude-yolo-until-done` to execute the approved plan.
+Normal usage is simple: initialize local grill-storm bundle, let `Interviewer` and `Planner` converge on docs, then use `claude-yolo-until-done` to execute approved plan.
 
-This skill is a fail-closed workflow, not a general coding prompt. If its runtime, inputs, or hooks are incomplete, it must stop instead of improvising.
+This skill is fail-closed workflow, not general coding prompt. If runtime, planning docs, inputs, or hooks are incomplete, it must stop instead of improvising.
 
 ## Recommended Usage
-- Keep the output folder as the current working directory unless the user names another one.
-- Treat `.yolo/` inside that output folder as the default run root.
-- If the user already provides exact spec and plan paths, use them directly.
-- Do not invoke another execution skill for the main run.
+- Keep output folder as current working directory unless user names another one.
+- Treat `docs/` inside output folder as default planning bundle.
+- Treat `.yolo/` inside output folder as default run root.
+- If user already provides exact spec and plan paths, use them directly.
+- Do not invoke another execution skill for main run.
 
 ## Required Operating Mode
-- Treat this directory as a multi-file workflow, not a single prompt.
-- `superpowers` is mandatory. If it is not installed, this workflow must fail closed and stop.
-- Claude Code hooks are mandatory. If hooks are unavailable, this workflow must fail closed and stop.
-- `--dangerously-skip-permissions` is mandatory. If it was not enabled for the current Claude Code run, this workflow must fail closed and stop.
-- Interactive Claude Code is mandatory. Headless `claude -p` print mode is not supported because Stop-hook blocking cannot keep an unfinished claude-yolo run alive there.
-- preflight owns startup classification. If the approved plan and spec exist but the run root does not yet exist, preflight should bootstrap a new run with `workflow/bootstrap.py` instead of failing just because `.yolo/` is absent.
-- Only a continue-run path should fail closed for missing durable state. Once a run root already exists, missing or incomplete `state.json` or `trace.md` must block continuation.
-- This skill may consume a plan, continue a run, repair failures, verify progress, update durable state, and advance worker/watcher transitions.
-- This skill may not replace planning, rewrite scope silently, or weaken verification because the current session is tired, compressed, or blocked.
+- Claude Code hooks are mandatory for execution phase. If hooks are unavailable, this workflow must fail closed and stop.
+- `--dangerously-skip-permissions` is mandatory for execution phase. If it was not enabled for current Claude Code run, this workflow must fail closed and stop.
+- Interactive Claude Code is mandatory for execution phase. Headless `claude -p` print mode is not supported because Stop-hook blocking cannot keep unfinished claude-yolo run alive there.
+- preflight owns startup classification. If approved plan and spec exist but run root does not yet exist, preflight should bootstrap new run with `workflow/bootstrap.py` instead of failing just because `.yolo/` is absent.
+- Only continue-run path should fail closed for missing durable state. Once run root already exists, missing or incomplete `state.json` or `trace.md` must block continuation.
+- Planning mode should use shared docs as primary context, not chat history.
+- Planning mode should use `Interviewer` and `Planner` in turn loop, with one key question at time and ask-late behavior.
+- This skill may consume plan, continue run, repair failures, verify progress, update durable state, and advance worker/watcher transitions.
+- This skill may not replace planning with hidden assumptions, rewrite scope silently, or weaken verification because current session is tired, compressed, or blocked.
 
 ## Startup Contract
-- New run: approved spec and plan exist, but `.yolo/` does not yet exist. preflight should bootstrap the run root first, then install the current local hook set, then continue execution.
-- Continue run: `.yolo/state.json` and `.yolo/trace.md` already exist. preflight should verify them, reinstall the current local hook set if needed, and resume from the durable state.
-- Invalid run: if the skill lacks either approved planning artifacts for a new run, or coherent durable state for a continue-run path, it must fail closed and stop.
-- Legacy local hook settings are not a blocker for a new run. The install step is idempotent and should replace same-run claude-yolo hook groups with the current contract.
+- Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
+- Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and ask user only when blocking high-impact gap remains.
+- New run: approved spec and plan exist, but `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
+- Continue run: `.yolo/state.json` and `.yolo/trace.md` already exist. preflight should verify them, reinstall current local hook set if needed, and resume from durable state.
+- Invalid run: if skill lacks either approved planning artifacts for new run, or coherent durable state for continue-run path, it must fail closed and stop.
+- Legacy local hook settings are not blocker for new run. Install step is idempotent and should replace same-run claude-yolo hook groups with current contract.
 
 ## Required File Order
 Read these files first:
 - `policy/required-runtime.md`
-- `policy/required-superpowers.md`
+- `policy/required-authoring.md`
 - `policy/required-inputs.md`
 - `policy/invariants.md`
 - `policy/failure-behavior.md`
@@ -51,26 +54,40 @@ Then run preflight before ordinary execution continues.
 
 ## Required Artifacts
 This workflow expects at least:
-- approved spec, typically under `docs/superpowers/specs/`
-- approved implementation plan, typically under `docs/superpowers/plans/`
-- `<run-root>/state.json`, with `.yolo/` as the default example run root
+- `docs/intent.md`
+- `docs/open-questions.md`
+- `docs/decisions.md`
+- approved spec, typically under `docs/spec.md`
+- approved implementation plan, typically under `docs/plan.md`
+- `<run-root>/state.json`, with `.yolo/` as default example run root
 - `<run-root>/trace.md`
 
-When the user does not specify an output folder, treat the current working directory as the output folder and `.yolo/` inside it as the default run root.
+When user does not specify output folder, treat current working directory as output folder and keep both `docs/` and `.yolo/` inside it by default.
 
-Use the templates in `templates/` only to define the expected shape of those artifacts. Do not treat template presence as proof that a real run exists.
+Use templates in `templates/` only to define expected shape of runtime artifacts. Do not treat template presence as proof that real run exists.
+
+## Planning Model
+Planning loop should:
+- prefer internal code and docs verification before asking user
+- ask at most one user question per round
+- include recommended answer or direction with every user question
+- keep `spec.md` for stable requirements only
+- grow `plan.md` only after spec is stable
+- keep confirmed decisions in `decisions.md`
+- keep blocking unknowns in `open-questions.md`
+- keep agent talk grounded in docs instead of chat-only memory
 
 ## Runtime Model
-The durable status flow is:
+Durable status flow is:
 - `active`
 - `needs_review`
 - `rework_required`
 - `approved`
 - `complete`
 
-The worker may submit only with fresh verification evidence.
+Worker may submit only with fresh verification evidence.
 
-The watcher must review before completion and must record a structured review payload.
+Watcher must review before completion and must record structured review payload.
 
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 
@@ -84,19 +101,20 @@ Minimum hook-backed claims should cover:
 - submission readiness
 - completion readiness
 
-No hook output means no pass claim for the corresponding hook-backed decision.
+No hook output means no pass claim for corresponding hook-backed decision.
 
 ## Anti-Bypass Rules
-- Do not invent a plan inline.
-- Do not continue from a vague request.
-- Do not enter YOLO mode before `superpowers` has produced an approved spec and plan.
+- Do not invent plan inline without updating shared planning docs.
+- Do not continue from vague request directly into execution.
+- Do not enter YOLO mode before approved spec and plan exist.
 - Do not weaken watcher review.
 - Do not treat partial progress as completion.
-- Do not stop after code changes without re-running the required verification step for the current submission.
-- Do not treat a local summary, a chat recap, or a stale handoff as a substitute for the current durable state.
+- Do not stop after code changes without re-running required verification step for current submission.
+- Do not treat local summary, chat recap, or stale handoff as substitute for current durable state.
+- Do not write unconfirmed assumptions as final conclusions.
 
 ## When Refactoring This Skill
-Prefer moving enforceable checks into hooks and lightweight validators instead of adding more prose here.
+Prefer moving enforceable execution checks into hooks and lightweight validators instead of adding more prose here. Prefer keeping planning-state rules in shared docs and agent prompts instead of hidden chat conventions.
 
 ## Operator Docs
 For real Claude Code hook installation and session integration, read `README.md`.

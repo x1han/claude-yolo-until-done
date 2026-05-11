@@ -10,6 +10,9 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
+sys.path.insert(0, str(SKILL_ROOT / "workflow"))
+
+from bootstrap import bootstrap_run
 
 
 class BootstrapLightweightBundleTest(unittest.TestCase):
@@ -92,6 +95,32 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             self.assertFalse((run_root / "state.json").exists())
             self.assertFalse((run_root / "trace.md").exists())
 
+    def test_bootstrap_run_persists_loop_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Loop\n- Verify: done\n", encoding="utf-8")
+            run_root = project_dir / ".yolo"
+
+            bootstrap_run(
+                spec_path=spec_path,
+                plan_path=plan_path,
+                run_root=run_root,
+                goal="Loop bootstrap.",
+                success_criteria=["Loop policy persisted."],
+                repo_root=project_dir,
+                mode="loop",
+                loop_max_iterations=3,
+                loop_stop_on_convergence=True,
+            )
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["mode"], "loop")
+            self.assertEqual(state["loop"]["max_iterations"], 3)
+            self.assertTrue(state["loop"]["stop_on_convergence"])
+
     def test_bootstrap_defaults_allow_need_human_true(self) -> None:
         result = self.run_bootstrap()
         state = json.loads((Path(result["run_root"]) / "state.json").read_text(encoding="utf-8"))
@@ -101,6 +130,27 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
         result = self.run_bootstrap("--disallow-need-human")
         state = json.loads((Path(result["run_root"]) / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["allow_need_human"])
+
+    def test_bootstrap_seeds_authoritative_runtime_fields(self) -> None:
+        result = self.run_bootstrap()
+        state = json.loads((Path(result["run_root"]) / "state.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(state["status"], "active")
+        self.assertEqual(state["state_version"], 1)
+        self.assertEqual(state["current_task"]["task_id"], state["task_id"])
+        self.assertEqual(state["current_task"]["task_title"], state["task_title"])
+        self.assertEqual(state["current_task"]["task_inputs"], state["task_inputs"])
+        self.assertEqual(state["next_action"], "worker_update")
+        self.assertEqual(state["dispatch_status"], "pending")
+        self.assertEqual(state["dispatch_intent"], {"role": "worker", "action": "worker_update"})
+        self.assertEqual(state["last_transition_id"], "")
+        self.assertEqual(state["last_transition_actor"], "")
+        self.assertEqual(state["hook_config_hash"], "")
+        self.assertEqual(state["task_packet_hash"], "")
+        self.assertEqual(state["certification_hash"], "")
+        self.assertEqual(state["certification"], {})
+        self.assertEqual(state["retry_budget"], {"worker": 0, "helper": 0, "backoff_until": ""})
+        self.assertEqual(state["task_goal"], state["goal"])
 
     def test_bootstrap_writes_lightweight_run_bundle(self) -> None:
         result = self.run_bootstrap()

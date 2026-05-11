@@ -9,6 +9,9 @@ REQUIRED_STATE_FIELDS = (
     "goal",
     "success_criteria",
     "status",
+    "task_id",
+    "task_title",
+    "task_inputs",
     "worker_claim",
     "files_changed",
     "verification_command",
@@ -43,11 +46,11 @@ def base_report(stage: int | str, run_root: Path) -> dict:
     }
 
 
-def add_check(report: dict, name: str, passed: bool, detail: str) -> None:
-    report["checks"].append({"name": name, "passed": passed, "detail": detail})
+def add_check(report: dict, name: str, passed: bool, detail: str, *, source: str = "state.json") -> None:
+    report["checks"].append({"name": name, "passed": passed, "detail": detail, "source": source})
     if not passed:
         report["passed"] = False
-        report["failures"].append({"name": name, "detail": detail})
+        report["failures"].append({"name": name, "detail": detail, "source": source})
 
 
 def load_json(path: Path) -> dict:

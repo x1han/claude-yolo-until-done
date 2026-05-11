@@ -1,9 +1,27 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+
+from lifecycle import compute_certification_hash
+
+
+@contextmanager
+def settings_lock(path: Path):
+    lock_path = path.with_name(f"{path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def load_json(path: Path) -> dict:
@@ -13,8 +31,7 @@ def load_json(path: Path) -> dict:
 
 
 def write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    write_json_if_changed(path, payload)
 
 
 def write_json_if_changed(path: Path, payload: dict) -> None:
@@ -22,7 +39,15 @@ def write_json_if_changed(path: Path, payload: dict) -> None:
     if path.exists() and path.read_text(encoding="utf-8") == rendered:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(rendered, encoding="utf-8")
+    temp_file = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False)
+    temp_path = Path(temp_file.name)
+    try:
+        with temp_file:
+            temp_file.write(rendered)
+        os.replace(temp_path, path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def normalize_run_root(run_root: str) -> str:
@@ -163,43 +188,77 @@ def prune_workflow_hooks_for_run_root(settings: dict, run_root: str, allowed_rol
         del settings["hooks"]
 
 
+
+def installed_hook_groups(settings: dict, run_root: str) -> list[dict]:
+    hooks_root = settings.get("hooks", {})
+    if not isinstance(hooks_root, dict):
+        return []
+    groups: list[dict] = []
+    for event_name in sorted(hooks_root):
+        event_list = hooks_root.get(event_name)
+        if not isinstance(event_list, list):
+            continue
+        for group in event_list:
+            metadata = group.get("metadata") if isinstance(group, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("workflow") != "claude-yolo-until-done":
+                continue
+            if metadata.get("run_root") != run_root:
+                continue
+            groups.append({"event": event_name, "group": group})
+    return groups
+
+
+
+def hook_config_hash(groups: list[dict]) -> str:
+    return compute_certification_hash(groups)
+
+
+
+def installed_hook_config_hash(settings: dict, run_root: str) -> str:
+    return hook_config_hash(installed_hook_groups(settings, run_root))
+
+
 def install_hook_set(settings_path: Path, python_exe: Path, bridge_path: Path, run_root: str) -> dict:
-    settings = load_json(settings_path)
-    normalized_run_root = normalize_run_root(run_root)
-    prune_workflow_hooks_for_run_root(settings, normalized_run_root, {"SessionStart", "Stop", "UserPromptSubmit"})
-    upsert_event_hooks(settings, "SessionStart", build_session_start_group(python_exe, bridge_path, normalized_run_root))
-    upsert_event_hooks(settings, "Stop", build_stop_group(python_exe, bridge_path, normalized_run_root))
-    upsert_event_hooks(
-        settings,
-        "UserPromptSubmit",
-        build_user_prompt_submit_group(python_exe, bridge_path, normalized_run_root),
-    )
-    workflow_markers(settings)[normalized_run_root] = {
-        "workflow": "claude-yolo-until-done",
-        "run_root": normalized_run_root,
-    }
-    write_json_if_changed(settings_path, settings)
-    return settings
+    with settings_lock(settings_path):
+        settings = load_json(settings_path)
+        normalized_run_root = normalize_run_root(run_root)
+        prune_workflow_hooks_for_run_root(settings, normalized_run_root, {"SessionStart", "Stop", "UserPromptSubmit"})
+        upsert_event_hooks(settings, "SessionStart", build_session_start_group(python_exe, bridge_path, normalized_run_root))
+        upsert_event_hooks(settings, "Stop", build_stop_group(python_exe, bridge_path, normalized_run_root))
+        upsert_event_hooks(
+            settings,
+            "UserPromptSubmit",
+            build_user_prompt_submit_group(python_exe, bridge_path, normalized_run_root),
+        )
+        workflow_markers(settings)[normalized_run_root] = {
+            "workflow": "claude-yolo-until-done",
+            "run_root": normalized_run_root,
+        }
+        write_json_if_changed(settings_path, settings)
+        return settings
 
 
 def uninstall_hook_set(settings_path: Path, python_exe: Path, bridge_path: Path, run_root: str) -> dict:
-    settings = load_json(settings_path)
-    normalized_run_root = normalize_run_root(run_root)
-    marker_root = settings.get("claudeYoloUntilDone", {})
-    marker_runs = marker_root.get("runs", {}) if isinstance(marker_root, dict) else {}
-    remove_event_hooks(settings, "SessionStart", build_session_start_group(python_exe, bridge_path, normalized_run_root))
-    remove_event_hooks(settings, "Stop", build_stop_group(python_exe, bridge_path, normalized_run_root))
-    remove_event_hooks(
-        settings,
-        "UserPromptSubmit",
-        build_user_prompt_submit_group(python_exe, bridge_path, normalized_run_root),
-    )
-    if isinstance(marker_runs, dict) and normalized_run_root in marker_runs:
-        del marker_runs[normalized_run_root]
-    if isinstance(marker_root, dict) and not marker_root.get("runs") and "claudeYoloUntilDone" in settings:
-        del settings["claudeYoloUntilDone"]
-    write_json_if_changed(settings_path, settings)
-    return settings
+    with settings_lock(settings_path):
+        settings = load_json(settings_path)
+        normalized_run_root = normalize_run_root(run_root)
+        marker_root = settings.get("claudeYoloUntilDone", {})
+        marker_runs = marker_root.get("runs", {}) if isinstance(marker_root, dict) else {}
+        remove_event_hooks(settings, "SessionStart", build_session_start_group(python_exe, bridge_path, normalized_run_root))
+        remove_event_hooks(settings, "Stop", build_stop_group(python_exe, bridge_path, normalized_run_root))
+        remove_event_hooks(
+            settings,
+            "UserPromptSubmit",
+            build_user_prompt_submit_group(python_exe, bridge_path, normalized_run_root),
+        )
+        if isinstance(marker_runs, dict) and normalized_run_root in marker_runs:
+            del marker_runs[normalized_run_root]
+        if isinstance(marker_root, dict) and not marker_root.get("runs") and "claudeYoloUntilDone" in settings:
+            del settings["claudeYoloUntilDone"]
+        write_json_if_changed(settings_path, settings)
+        return settings
 
 
 def main() -> int:

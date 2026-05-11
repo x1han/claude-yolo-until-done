@@ -6,17 +6,38 @@ import json
 import sys
 from pathlib import Path
 
-from orchestrator import orchestrate
-from state import utc_now, write_state
+from lifecycle import ACTIVE_STATUSES, completion_certification_problem, is_completed_cleanup_state
+from orchestrator import (
+    ABANDONED_STATUS,
+    CLAIMED_STATUS,
+    COMPLETED_STATUS,
+    DISPATCHED_STATUS,
+    IDLE_STATUS,
+    PENDING_STATUS,
+    RUNNING_STATUS,
+    TIMED_OUT_STATUS,
+    dispatch_requires_intent,
+    is_dispatch_claim_live,
+    mark_dispatch_pending,
+    parse_timestamp,
+)
+from state import StaleStateVersionError, build_resume_target, transition_state, utc_now, write_state
 
 HOOKS_DIR = Path(__file__).resolve().parents[1] / "hooks"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
-from validate_completion import run as validate_completion
 
-
-ACTIVE_STATUSES = {"active", "needs_review", "rework_required", "approved"}
+VALID_DISPATCH_STATUSES = {
+    IDLE_STATUS,
+    PENDING_STATUS,
+    CLAIMED_STATUS,
+    RUNNING_STATUS,
+    DISPATCHED_STATUS,
+    COMPLETED_STATUS,
+    TIMED_OUT_STATUS,
+    ABANDONED_STATUS,
+}
 CONTINUE_CHOICES = {"继续 yolo", "continue yolo"}
 PROMPT_FIELDS = ("prompt", "text", "userPrompt")
 
@@ -37,6 +58,7 @@ def load_json(path: Path) -> dict:
 
 def validate_stop_state(state: dict, run_root: Path) -> str | None:
     required_fields = (
+        "state_version",
         "status",
         "cleanup_required",
         "owner",
@@ -52,6 +74,12 @@ def validate_stop_state(state: dict, run_root: Path) -> str | None:
                 f"Run root exists at {run_root} but state.json is missing required field {field!r}; "
                 "the durable run bundle must be repaired before continuing."
             )
+    state_version = state.get("state_version")
+    if not isinstance(state_version, int) or state_version < 1:
+        return (
+            f"Run root exists at {run_root} but state_version is invalid; "
+            "the durable run bundle must be repaired before continuing."
+        )
     try:
         gate_attempt = int(state["gate_attempt"])
         gate_max_attempts = int(state["gate_max_attempts"])
@@ -65,6 +93,64 @@ def validate_stop_state(state: dict, run_root: Path) -> str | None:
             f"Run root exists at {run_root} but gate counters are invalid; "
             "the durable run bundle must be repaired before continuing."
         )
+
+    status = state["status"]
+    if status not in ACTIVE_STATUSES:
+        return None
+
+    dispatch_fields = ("dispatch_status", "dispatch_intent", "dispatch_claim", "last_dispatch")
+    for field in dispatch_fields:
+        if field not in state:
+            return (
+                f"Run root exists at {run_root} but active state.json is missing required dispatch field {field!r}; "
+                "the durable run bundle must be repaired before continuing."
+            )
+
+    dispatch_status = state["dispatch_status"]
+    if not isinstance(dispatch_status, str) or dispatch_status not in VALID_DISPATCH_STATUSES:
+        return (
+            f"Run root exists at {run_root} but dispatch_status is invalid for active work; "
+            "the durable run bundle must be repaired before continuing."
+        )
+
+    dispatch_intent = state["dispatch_intent"]
+    dispatch_claim = state["dispatch_claim"]
+    last_dispatch = state["last_dispatch"]
+    if not isinstance(dispatch_intent, dict) or not isinstance(dispatch_claim, dict) or not isinstance(last_dispatch, dict):
+        return (
+            f"Run root exists at {run_root} but persisted dispatch metadata is malformed for active work; "
+            "the durable run bundle must be repaired before continuing."
+        )
+
+    if dispatch_status in {"pending", "claimed", "running"}:
+        role = dispatch_intent.get("role")
+        action = dispatch_intent.get("action")
+        if not isinstance(role, str) or not role.strip() or not isinstance(action, str) or not action.strip():
+            return (
+                f"Run root exists at {run_root} but dispatch_intent is invalid for active work; "
+                "the durable run bundle must be repaired before continuing."
+            )
+
+    if dispatch_status in {"claimed", "running"}:
+        owner = dispatch_claim.get("owner")
+        if not isinstance(owner, str) or not owner.strip():
+            return (
+                f"Run root exists at {run_root} but dispatch_claim.owner is invalid for active work; "
+                "the durable run bundle must be repaired before continuing."
+            )
+        claimed_at = parse_timestamp(dispatch_claim.get("claimed_at"))
+        if claimed_at is None:
+            return (
+                f"Run root exists at {run_root} but dispatch_claim.claimed_at is invalid for active work; "
+                "the durable run bundle must be repaired before continuing."
+            )
+        lease_expires_at = parse_timestamp(dispatch_claim.get("lease_expires_at"))
+        if lease_expires_at is None:
+            return (
+                f"Run root exists at {run_root} but dispatch_claim.lease_expires_at is invalid for active work; "
+                "the durable run bundle must be repaired before continuing."
+            )
+
     return None
 
 
@@ -89,11 +175,12 @@ def is_explicit_continue_choice(hook_input: dict) -> bool:
 
 
 def is_human_helper_mode(state: dict) -> bool:
-    return (
-        state.get("allow_need_human") is True
-        and bool(state.get("blocked_for_human"))
-        and state.get("worker_request") == "need_human"
-    )
+    if state.get("allow_need_human") is not True or not bool(state.get("blocked_for_human")):
+        return False
+    if state.get("worker_request") == "need_human":
+        return True
+    handoff = state.get("human_handoff") if isinstance(state.get("human_handoff"), dict) else {}
+    return handoff.get("reason") == "stop_gate_limit"
 
 
 def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None) -> dict:
@@ -159,16 +246,56 @@ def emit_session_start_context(run_root: Path, state: dict | None = None, broken
     return 0
 
 
+def completion_certification_reason(run_root: Path, state: dict) -> str | None:
+    if state.get("status") not in {"ready_for_cleanup", "complete"}:
+        return None
+    problem = completion_certification_problem(state)
+    if problem == "status_invalid":
+        return (
+            f"Run root exists at {run_root} but persisted completion certification is missing or invalid; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    if problem == "cleanup_state_invalid":
+        return (
+            f"Run root exists at {run_root} but persisted completion certification has the wrong cleanup_state; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    if problem == "cleanup_ready_state_hash_missing":
+        return (
+            f"Run root exists at {run_root} but persisted completion certification is missing cleanup-ready state proof; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    if problem == "cleanup_ready_state_hash_mismatch":
+        return (
+            f"Run root exists at {run_root} but persisted completion certification no longer matches the cleanup-ready state snapshot; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    if problem == "hash_missing":
+        return (
+            f"Run root exists at {run_root} but certification_hash is missing for persisted completion certification; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    if problem == "hash_mismatch":
+        return (
+            f"Run root exists at {run_root} but certification_hash does not match persisted completion certification; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    return None
+
+
+
 def invalid_complete_bundle_reason(run_root: Path, state: dict) -> str | None:
-    if state.get("status") != "complete" or state.get("cleanup_required"):
+    certification_reason = completion_certification_reason(run_root, state)
+    if certification_reason:
+        return certification_reason
+    if state.get("status") != "complete" or state.get("cleanup_required") is not False:
         return None
-    report = validate_completion(run_root)
-    if report.get("passed"):
-        return None
-    return (
-        f"Run root exists at {run_root} but completion validation still fails; "
-        "the durable run bundle must be repaired or cleaned up before continuing."
-    )
+    if not is_completed_cleanup_state(state):
+        return (
+            f"Run root exists at {run_root} but complete-state terminal cleanup contract is invalid; "
+            "the durable run bundle must be repaired or cleaned up before continuing."
+        )
+    return None
 
 
 
@@ -201,11 +328,8 @@ def load_stop_state(run_root: Path) -> tuple[dict | None, str | None]:
         return None, f"Run root exists at {run_root} but is not a directory; the run bundle must be repaired or removed before continuing."
 
     state_path = run_root / "state.json"
-    trace_path = run_root / "trace.md"
     if not state_path.exists():
         return None, f"Run root exists at {run_root} but state.json is missing; the durable run bundle must be repaired or cleaned up before continuing."
-    if not trace_path.exists():
-        return None, f"Run root exists at {run_root} but trace.md is missing; the durable run bundle must be repaired or cleaned up before continuing."
 
     try:
         state = load_json(state_path)
@@ -225,29 +349,42 @@ def should_persist_worker_return_gate(state: dict) -> bool:
         return False
     if state.get("requested_role", "worker") != "worker":
         return False
+    if state.get("dispatch_status", "idle") in {"pending", "claimed", "running"}:
+        return False
     next_action = state.get("next_action", "")
     return isinstance(next_action, str) and next_action.startswith("worker_")
 
 
 def persist_stop_gate(state: dict, run_root: Path) -> tuple[int, int, bool]:
-    attempts = int(state.get("gate_attempt", 0)) + 1
-    max_attempts = int(state.get("gate_max_attempts", 5))
-    state["gate_attempt"] = attempts
-    state["gate_reason"] = "worker_return_stop_block"
-    state["updated_at"] = utc_now()
+    expected_version = int(state.get("state_version", 1))
 
-    reached_limit = attempts >= max_attempts
-    if reached_limit:
-        state["blocked_for_human"] = True
-        state["owner"] = "human"
-        state["next_action"] = "human_handoff"
-        state["requested_role"] = "human"
-        state["dispatch_status"] = "idle"
-        state["last_dispatch"] = {}
-        state["human_handoff"] = {"reason": "stop_gate_limit"}
+    def apply(current_state: dict, _: str) -> None:
+        attempts = int(current_state.get("gate_attempt", 0)) + 1
+        max_attempts = int(current_state.get("gate_max_attempts", 5))
+        current_state["gate_attempt"] = attempts
+        current_state["gate_reason"] = "worker_return_stop_block"
 
-    write_state(run_root, state)
-    return attempts, max_attempts, reached_limit
+        reached_limit = attempts >= max_attempts
+        if reached_limit:
+            current_state["resume_target"] = build_resume_target(current_state)
+            current_state["blocked_for_human"] = True
+            current_state["owner"] = "human"
+            current_state["next_action"] = "human_handoff"
+            current_state["worker_request"] = "need_human"
+            current_state["worker_question"] = "Stop gate limit reached; human guidance is required before the run can resume."
+            mark_dispatch_pending(current_state, "human")
+            current_state["human_handoff"] = {"reason": "stop_gate_limit"}
+
+    updated_state = transition_state(
+        run_root,
+        actor="stop_hook",
+        action="persist_stop_gate",
+        expected_version=expected_version,
+        apply_transition=apply,
+    )
+    attempts = int(updated_state.get("gate_attempt", 0))
+    max_attempts = int(updated_state.get("gate_max_attempts", 5))
+    return attempts, max_attempts, attempts >= max_attempts
 
 
 def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
@@ -259,19 +396,32 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
 
     status = state["status"]
     if state["blocked_for_human"]:
-        orchestration = orchestrate(run_root, state)
         handoff_reason = state.get("human_handoff", {}).get("reason")
         if handoff_reason == "stop_gate_limit":
             return emit_block(
                 "Workflow is blocked for human handoff because the stop gate limit was reached; record guidance or cancel the run before stopping.",
-                orchestration,
             )
-        return emit_block("Workflow is blocked for human handoff; record guidance or cancel the run before stopping.", orchestration)
+        return emit_block("Workflow is blocked for human handoff; record guidance or cancel the run before stopping.")
+
+    if status in ACTIVE_STATUSES and dispatch_requires_intent(state):
+        return emit_block(
+            "Workflow dispatch still needs durable dispatch_intent metadata before stop can continue; repair the run state and resume.",
+        )
+
+    if status in ACTIVE_STATUSES and is_dispatch_claim_live(state):
+        claim = state.get("dispatch_claim", {})
+        owner = claim.get("owner", "unknown")
+        return emit_block(
+            f"Workflow has a live dispatch claim owned by {owner}; let that consumer finish or wait for the lease to expire before stopping.",
+        )
 
     if status in ACTIVE_STATUSES:
         reason = f"Workflow status is {status}; continue the current goal instead of stopping."
         if should_persist_worker_return_gate(state):
-            attempts, max_attempts, reached_limit = persist_stop_gate(state, run_root)
+            try:
+                attempts, max_attempts, reached_limit = persist_stop_gate(state, run_root)
+            except StaleStateVersionError as error:
+                return emit_block(str(error))
             if reached_limit:
                 reason = (
                     f"Workflow status is {status}; stop gate hit worker return limit "
@@ -279,16 +429,20 @@ def stop(project_dir: Path, run_root: Path, hook_input: dict) -> int:
                 )
             else:
                 reason = f"{reason} Worker return stop gate attempt {attempts}/{max_attempts}."
-        orchestration = orchestrate(run_root, state)
-        return emit_block(reason, orchestration)
+        return emit_block(reason)
+
+    certification_reason = completion_certification_reason(run_root, state)
+    if certification_reason:
+        return emit_block(certification_reason)
+
+    invalid_complete_reason = invalid_complete_bundle_reason(run_root, state)
+    if invalid_complete_reason:
+        return emit_block(invalid_complete_reason)
 
     if state.get("cleanup_required"):
         return emit_block("Workflow completion still requires claude-yolo cleanup before stopping.")
 
     if status == "complete":
-        report = validate_completion(run_root)
-        if not report.get("passed"):
-            return emit_block("Workflow says complete but completion validation still fails.")
         return 0
 
     return emit_block(f"Workflow status is {status!r}; stop stays blocked until the durable run state is repaired or completed.")
