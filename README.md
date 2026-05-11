@@ -71,7 +71,7 @@ Runtime status model is intentionally small:
 - `needs_review`
 - `rework_required`
 - `approved`
-- `complete`
+- `ready_for_cleanup`
 
 ## Bootstrap
 
@@ -162,7 +162,7 @@ Submission validator checks that worker submission is complete and that `trace.m
 
 Completion validator checks that:
 
-- `state.json` says workflow is `complete`
+- `state.json` says workflow is `ready_for_cleanup`
 - watcher review verdict is `approve`
 - submission evidence is still present
 - `trace.md` contains both watcher review and watcher completion entries

@@ -83,7 +83,7 @@ Durable status flow is:
 - `needs_review`
 - `rework_required`
 - `approved`
-- `complete`
+- `ready_for_cleanup`
 
 Worker may submit only with fresh verification evidence.
 
