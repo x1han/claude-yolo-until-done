@@ -4,6 +4,14 @@
 
 `<run-root>/trace.md` is secondary operator-facing context. It records the activity trail, but when `trace.md` and `state.json` disagree, `state.json` wins.
 
+## Role agent session files
+
+`agent_sessions.json` is per `.yolo/` run and stores role-agent routing metadata only.
+
+Each role lab notebook lives under `agents/<role>-log.md`. It preserves concise operational context for later continuation or explicit replacement.
+
+These files do not override `state.json`. If they are missing, runtime may recreate them. If malformed, runtime fails closed or repairs without mutating workflow state.
+
 ## Required `state.json` fields
 
 It must always contain at least:

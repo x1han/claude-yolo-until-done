@@ -157,6 +157,16 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["worker_claim"], "")
             self.assertEqual(state["verification_command"], "")
             self.assertEqual(state["verification_result"], "")
+            registry = json.loads((run_root / "agent_sessions.json").read_text(encoding="utf-8"))
+            worker_session = registry["roles"]["worker"]
+            self.assertEqual(worker_session["status"], "active")
+            self.assertEqual(worker_session["generation"], 1)
+            self.assertEqual(worker_session["last_dispatch_owner"], "worker:gate-task-001:3")
+            self.assertTrue((run_root / worker_session["log_path"]).exists())
+            self.assertIn(
+                "dispatch worker:gate-task-001:3",
+                (run_root / worker_session["log_path"]).read_text(encoding="utf-8"),
+            )
 
     def test_loop_complete_stops_at_max_iterations_and_records_reason(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

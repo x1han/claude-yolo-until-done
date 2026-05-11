@@ -64,6 +64,8 @@ Lightweight runtime keeps two durable artifacts under chosen run root, with `.yo
 
 - `state.json` — authoritative workflow state
 - `trace.md` — append-only human-readable activity trail
+- `agent_sessions.json` — per `.yolo/` run role-agent routing metadata
+- `agents/<role>-log.md` — role lab notebook for durable agent context
 
 Runtime status model is intentionally small:
 
@@ -143,6 +145,14 @@ python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder
 python <skill-repo>/hooks/run_gate.py --validator submission --run-root <output-folder>/.yolo
 python <skill-repo>/hooks/run_gate.py --validator completion --run-root <output-folder>/.yolo
 ```
+
+## Persistent Role Agents
+
+Role agents are scoped per `.yolo/` run. Each role should be created once per run and then continued for later dispatches to that same role.
+
+`agent_sessions.json` stores routing metadata only. It does not replace `state.json` and does not decide workflow status.
+
+Each role keeps a role lab notebook at `agents/<role>-log.md`. Entries are concise experimental records: hypothesis, actions, observations, result, next. Summaries are compression cache only; the notebook is primary durable context.
 
 ## Hook Model
 

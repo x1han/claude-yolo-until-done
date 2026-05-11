@@ -101,6 +101,16 @@ class DocsAndTemplatesTest(unittest.TestCase):
             self.assertIn("either stop condition", body)
             self.assertIn("mode/config", body)
 
+    def test_docs_describe_persistent_role_agent_sessions(self) -> None:
+        readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "policy" / "run-state-contract.md").read_text(encoding="utf-8")
+
+        for body in (readme, skill, contract):
+            self.assertIn("agent_sessions.json", body)
+            self.assertIn("role lab notebook", body)
+            self.assertIn("per `.yolo/` run", body)
+
     def test_docs_describe_grill_first_then_yolo_usage(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
         quickstart = (SKILL_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")

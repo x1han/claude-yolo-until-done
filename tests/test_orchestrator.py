@@ -12,6 +12,7 @@ WORKFLOW_DIR = SKILL_ROOT / "workflow"
 if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
+from agent_sessions import load_agent_sessions
 from orchestrator import (
     build_task_packet,
     claim_dispatch,
@@ -619,6 +620,135 @@ class OrchestratorRoutingTest(unittest.TestCase):
         self.assertEqual(result["result"], "abandoned")
         self.assertEqual(persisted["dispatch_status"], "abandoned")
         self.assertEqual(persisted["dispatch_claim"]["terminal_reason"], "live claim is missing dispatch_intent")
+
+    def test_orchestrate_creates_worker_agent_session_on_first_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            state = {
+                "state_version": 1,
+                "task_id": "task-001",
+                "task_title": "Persist agent sessions",
+                "task_goal": "Keep worker context.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "worker",
+                "dispatch_status": "pending",
+                "dispatch_intent": {"role": "worker", "action": "worker_update"},
+                "dispatch_claim": {},
+                "dispatch_generation": 0,
+                "last_dispatch": {},
+                "worker_request": "",
+                "worker_question": "",
+                "human_handoff": {},
+                "blocked_for_human": False,
+                "status": "active",
+                "owner": "worker",
+                "supervision": {"last_token_io_at": "2026-05-11T00:00:00+00:00", "last_progress_at": "", "stall_timeout_seconds": 600, "retry_limit": 3, "retry_count": 0},
+            }
+            write_state(run_root, state)
+
+            result = orchestrate(run_root, state)
+
+            self.assertEqual(result["result"], "dispatched")
+            self.assertEqual(result["agent_session"]["role"], "worker")
+            self.assertEqual(result["agent_session"]["action"], "create")
+            self.assertEqual(result["agent_session"]["generation"], 1)
+            registry = load_agent_sessions(run_root)
+            self.assertEqual(registry["roles"]["worker"]["agent_id"], result["agent_session"]["agent_id"])
+
+    def test_orchestrate_reuses_worker_agent_session_on_replayed_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            state = {
+                "state_version": 1,
+                "task_id": "task-001",
+                "task_title": "Persist agent sessions",
+                "task_goal": "Keep worker context.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "worker",
+                "dispatch_status": "pending",
+                "dispatch_intent": {"role": "worker", "action": "worker_update"},
+                "dispatch_claim": {},
+                "dispatch_generation": 0,
+                "last_dispatch": {},
+                "worker_request": "",
+                "worker_question": "",
+                "human_handoff": {},
+                "blocked_for_human": False,
+                "status": "active",
+                "owner": "worker",
+                "supervision": {"last_token_io_at": "2026-05-11T00:00:00+00:00", "last_progress_at": "", "stall_timeout_seconds": 600, "retry_limit": 3, "retry_count": 0},
+            }
+            write_state(run_root, state)
+            first = orchestrate(run_root, state)
+            next_state = load_state(run_root)
+            next_state["state_version"] += 1
+            next_state["dispatch_status"] = "pending"
+            next_state["dispatch_intent"] = {"role": "worker", "action": "worker_update"}
+            next_state["dispatch_claim"] = {}
+            next_state["last_dispatch"] = {}
+            write_state(run_root, next_state)
+
+            second = orchestrate(run_root, next_state)
+
+            self.assertEqual(second["agent_session"]["action"], "reuse")
+            self.assertEqual(second["agent_session"]["agent_id"], first["agent_session"]["agent_id"])
+
+    def test_orchestrate_enriches_legacy_replayed_dispatch_with_agent_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            state = {
+                "state_version": 1,
+                "task_id": "task-001",
+                "task_title": "Persist agent sessions",
+                "task_goal": "Keep worker context.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "worker",
+                "dispatch_status": "running",
+                "dispatch_intent": {"role": "worker", "action": "worker_update"},
+                "dispatch_claim": {
+                    "owner": "worker:gate-task-001:1",
+                    "claimed_at": "2026-05-11T00:00:00+00:00",
+                    "lease_expires_at": "2999-01-01T00:00:00+00:00",
+                },
+                "last_dispatch": {
+                    "role": "worker",
+                    "task_id": "task-001",
+                    "gate_id": "gate-task-001",
+                    "dispatch_owner": "worker:gate-task-001:1",
+                    "next_action": "worker_update",
+                    "dispatched_at": "2026-05-11T00:00:00+00:00",
+                    "task_packet": {"role": "worker"},
+                },
+                "worker_request": "",
+                "worker_question": "",
+                "human_handoff": {},
+                "blocked_for_human": False,
+                "status": "active",
+                "owner": "worker",
+                "supervision": {"last_token_io_at": "2026-05-11T00:00:00+00:00", "last_progress_at": "", "stall_timeout_seconds": 600, "retry_limit": 3, "retry_count": 0},
+            }
+            write_state(run_root, state)
+
+            result = orchestrate(run_root, state, consumer_id="worker:gate-task-001:1")
+            persisted = load_state(run_root)
+
+            self.assertEqual(result["agent_session"]["action"], "create")
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["agent_id"], result["agent_session"]["agent_id"])
 
     def test_orchestrate_noops_after_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

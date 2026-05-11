@@ -93,6 +93,12 @@ Default mode is acyclic. Loop mode is selected only at preflight/bootstrap with 
 
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 
+Role agent sessions are per `.yolo/` run. Reuse the same role agent for later dispatches to that role when possible.
+
+`agent_sessions.json` stores role-agent routing metadata. It is not workflow authority. `state.json` remains authoritative.
+
+Each role maintains a role lab notebook in `agents/<role>-log.md`: short caveman-style experimental records with hypothesis, actions, observations, result, and next.
+
 ## Hook Requirement
 Use hooks to certify claims that are easy to rationalize away.
 

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+from agent_sessions import ensure_agent_session_files
 from checklist import build_master_checklist
 from state import build_state, build_trace, sync_current_task_view, write_json, write_text
 
@@ -73,6 +74,7 @@ def bootstrap_run(
     write_json(state_path, state)
     write_text(trace_path, trace)
     write_json(checklist_path, checklist)
+    ensure_agent_session_files(resolved_run_root)
 
     return {
         "run_root": str(resolved_run_root),

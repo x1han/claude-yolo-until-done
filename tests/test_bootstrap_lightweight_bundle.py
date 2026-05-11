@@ -152,6 +152,20 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
         self.assertEqual(state["retry_budget"], {"worker": 0, "helper": 0, "backoff_until": ""})
         self.assertEqual(state["task_goal"], state["goal"])
 
+    def test_bootstrap_writes_agent_session_registry_and_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            result = self.run_bootstrap("--run-root", str(run_root))
+
+            self.assertEqual(result["run_root"], str(run_root))
+            registry_path = run_root / "agent_sessions.json"
+            self.assertTrue(registry_path.exists())
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(registry["roles"]), {"worker", "watcher", "helper", "interviewer", "planner"})
+            for role in registry["roles"]:
+                self.assertTrue((run_root / "agents" / f"{role}-log.md").exists())
+                self.assertTrue((run_root / "agents" / f"{role}-summary.md").exists())
+
     def test_bootstrap_writes_lightweight_run_bundle(self) -> None:
         result = self.run_bootstrap()
         run_root = Path(result["run_root"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from agent_sessions import resolve_role_session
 from state import append_trace_event, build_resume_target, state_path, transition_state, utc_now, write_state
 
 
@@ -229,18 +230,23 @@ def dispatch_requires_intent(state: dict) -> bool:
     return state.get("dispatch_status") in {PENDING_STATUS, CLAIMED_STATUS, RUNNING_STATUS} and not bool(state.get("dispatch_intent"))
 
 
-def build_dispatch_record(state: dict, dispatched_at: str | None = None) -> dict:
+def build_dispatch_record(state: dict, run_root: Path | None = None, dispatched_at: str | None = None) -> dict:
     intent = dict(state.get("dispatch_intent", {}))
     role = dispatch_role(state)
     claim = state.get("dispatch_claim") if isinstance(state.get("dispatch_claim"), dict) else {}
+    dispatch_owner = claim.get("owner", dispatch_consumer_id(state, role=role))
+    agent_session = None
+    if run_root is not None and role != "human":
+        agent_session = resolve_role_session(run_root, role, dispatch_owner, now=dispatched_at)
     return {
         "role": role,
         "task_id": state.get("task_id", ""),
         "gate_id": state.get("gate_id", ""),
-        "dispatch_owner": claim.get("owner", dispatch_consumer_id(state, role=role)),
+        "dispatch_owner": dispatch_owner,
         "next_action": intent.get("action", state.get("next_action", "")),
         "dispatched_at": dispatched_at or utc_now(),
         "task_packet": build_task_packet(state, role),
+        "agent_session": agent_session or {},
     }
 
 
@@ -267,6 +273,14 @@ def replay_dispatch_record(state: dict, dispatched_at: str) -> dict | None:
     replayed["dispatch_owner"] = dict(state.get("dispatch_claim", {})).get("owner", replayed.get("dispatch_owner", ""))
     replayed["dispatched_at"] = dispatched_at
     return replayed
+
+
+def ensure_dispatch_agent_session(dispatch: dict, run_root: Path | None, dispatched_at: str) -> dict:
+    if run_root is None or dispatch.get("role") == "human" or dispatch.get("agent_session"):
+        return dispatch
+    enriched = dict(dispatch)
+    enriched["agent_session"] = resolve_role_session(run_root, dispatch["role"], dispatch.get("dispatch_owner", ""), now=dispatched_at)
+    return enriched
 
 
 def transition_dispatch_terminal(state: dict, status: str, timestamp: str, reason: str) -> None:
@@ -414,7 +428,7 @@ def recover_stalled_worker(state: dict, timestamp: str) -> dict:
     return {"result": "requeued", "reason": "worker_stalled"}
 
 
-def consume_dispatch(state: dict, consumer_id: str, now: str | None = None) -> tuple[dict, bool, bool]:
+def consume_dispatch(state: dict, consumer_id: str, run_root: Path | None = None, now: str | None = None) -> tuple[dict, bool, bool]:
     timestamp = now or utc_now()
     dispatch_status = state.get("dispatch_status", IDLE_STATUS)
     mutated = False
@@ -424,7 +438,8 @@ def consume_dispatch(state: dict, consumer_id: str, now: str | None = None) -> t
         claim = claim_dispatch(state, consumer_id=consumer_id, now=timestamp)
         if claim["result"] != "claimed":
             return claim, mutated, trace_required
-        dispatch = replay_dispatch_record(state, dispatched_at=timestamp) or build_dispatch_record(state, dispatched_at=timestamp)
+        dispatch = replay_dispatch_record(state, dispatched_at=timestamp) or build_dispatch_record(state, run_root=run_root, dispatched_at=timestamp)
+        dispatch = ensure_dispatch_agent_session(dispatch, run_root, timestamp)
         state["dispatch_status"] = RUNNING_STATUS
         state["last_dispatch"] = dispatch
         return {"result": "dispatched", **dispatch}, True, True
@@ -442,7 +457,10 @@ def consume_dispatch(state: dict, consumer_id: str, now: str | None = None) -> t
 
             dispatch = dict(state.get("last_dispatch", {}))
             if dispatch:
-                return {"result": "dispatched", **dispatch, "replayed": True}, mutated, trace_required
+                missing_agent_session = not bool(dispatch.get("agent_session"))
+                dispatch = ensure_dispatch_agent_session(dispatch, run_root, claim.get("claimed_at") or timestamp)
+                state["last_dispatch"] = dispatch
+                return {"result": "dispatched", **dispatch, "replayed": True}, missing_agent_session, trace_required
             if dispatch_requires_intent(state):
                 transition_dispatch_terminal(state, ABANDONED_STATUS, timestamp, "live claim is missing dispatch_intent")
                 return {
@@ -451,7 +469,7 @@ def consume_dispatch(state: dict, consumer_id: str, now: str | None = None) -> t
                     "reason": "live claim is missing dispatch_intent",
                 }, True, False
 
-            dispatch = build_dispatch_record(state, dispatched_at=claim.get("claimed_at") or timestamp)
+            dispatch = build_dispatch_record(state, run_root=run_root, dispatched_at=claim.get("claimed_at") or timestamp)
             state["dispatch_status"] = RUNNING_STATUS
             state["last_dispatch"] = dispatch
             return {"result": "dispatched", **dispatch, "replayed": True}, True, True
@@ -466,7 +484,7 @@ def consume_dispatch(state: dict, consumer_id: str, now: str | None = None) -> t
     return {"result": "no_op", "reason": f"dispatch_status={dispatch_status}"}, mutated, trace_required
 
 
-def orchestrate_step(state: dict, consumer_id: str | None = None, now: str | None = None) -> tuple[dict, bool, bool]:
+def orchestrate_step(state: dict, consumer_id: str | None = None, run_root: Path | None = None, now: str | None = None) -> tuple[dict, bool, bool]:
     timestamp = now or utc_now()
     stall_reason = worker_stall_reason(state, now=timestamp)
     if stall_reason == "worker_stalled":
@@ -477,7 +495,7 @@ def orchestrate_step(state: dict, consumer_id: str | None = None, now: str | Non
         return block_for_stall_problem(state, timestamp, "worker_stall_supervision_invalid"), True, False
 
     effective_consumer_id = consumer_id or default_consumer_id(state)
-    result, mutated, trace_required = consume_dispatch(state, consumer_id=effective_consumer_id, now=timestamp)
+    result, mutated, trace_required = consume_dispatch(state, consumer_id=effective_consumer_id, run_root=run_root, now=timestamp)
     if stall_reason == "worker_stalled":
         return result, True, trace_required
     return result, mutated, trace_required
@@ -496,7 +514,7 @@ def orchestrate(run_root: Path, state: dict, consumer_id: str | None = None) -> 
         outcome: dict[str, object] = {}
 
         def apply_transition(current_state: dict, timestamp: str) -> None:
-            result, _mutated, trace_required = orchestrate_step(current_state, consumer_id=consumer_id, now=timestamp)
+            result, _mutated, trace_required = orchestrate_step(current_state, consumer_id=consumer_id, run_root=run_root, now=timestamp)
             outcome["result"] = result
             outcome["trace_required"] = trace_required
 
@@ -515,7 +533,7 @@ def orchestrate(run_root: Path, state: dict, consumer_id: str | None = None) -> 
             )
         return result
 
-    result, mutated, trace_required = orchestrate_step(state, consumer_id=consumer_id)
+    result, mutated, trace_required = orchestrate_step(state, consumer_id=consumer_id, run_root=run_root)
     if result.get("result") != "dispatched":
         if mutated:
             write_state(run_root, state)

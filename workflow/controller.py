@@ -101,10 +101,10 @@ def require_dispatch_authority(state: dict, role: str, action_label: str) -> Non
 
 
 
-def publish_next_dispatch(state: dict) -> dict | None:
+def publish_next_dispatch(run_root: Path, state: dict) -> dict | None:
     if state.get("dispatch_status") != PENDING_STATUS:
         return None
-    result, _mutated, _trace_required = consume_dispatch(state, consumer_id=default_consumer_id(state))
+    result, _mutated, _trace_required = consume_dispatch(state, consumer_id=default_consumer_id(state), run_root=run_root)
     require(result.get("result") == "dispatched", f"Unable to publish next dispatch: {result}")
     return result
 
@@ -256,7 +256,7 @@ def main() -> int:
 
     def progress_transition(current_state: dict, _: str) -> None:
         nonlocal orchestration
-        orchestration = publish_next_dispatch(current_state)
+        orchestration = publish_next_dispatch(run_root, current_state)
 
     try:
         if args.action == "submit":
