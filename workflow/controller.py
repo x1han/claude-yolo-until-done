@@ -15,6 +15,7 @@ from lifecycle import (
     clear_completion_certification,
     compute_certification_hash,
 )
+from loop_scheduler import loop_decision
 from orchestrator import IDLE_STATUS, LIVE_CLAIM_STATUSES, PENDING_STATUS, consume_dispatch, default_consumer_id, dispatch_consumer_id, mark_dispatch_pending
 from state import StaleStateVersionError, append_trace_event, build_resume_target, format_trace_value, transition_state
 
@@ -33,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--files-changed", nargs="*")
     parser.add_argument("--verification-command")
     parser.add_argument("--verification-result")
+    parser.add_argument("--loop-converged", action="store_true")
 
     parser.add_argument("--verdict", choices=("approve", "rework_required"))
     parser.add_argument("--scope-checked", nargs="*")
@@ -126,6 +128,9 @@ def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> 
     state["verification_command"] = args.verification_command
     state["verification_result"] = args.verification_result
     state["submitted_at"] = timestamp
+    loop = state.get("loop")
+    if isinstance(loop, dict) and loop.get("enabled"):
+        loop["converged"] = bool(args.loop_converged)
     state["review"] = {}
     state["reviewed_at"] = ""
 
@@ -171,7 +176,36 @@ def update_for_review(state: dict, args: argparse.Namespace, timestamp: str) -> 
     state["reviewed_at"] = timestamp
 
 
-def update_for_complete(state: dict, args: argparse.Namespace, _: str) -> None:
+def reset_for_next_loop_iteration(state: dict, next_iteration: int) -> None:
+    loop = state["loop"]
+    loop["iteration"] = next_iteration
+    loop["stop_reason"] = ""
+    state["status"] = ACTIVE_STATUS
+    state["owner"] = "worker"
+    state["next_action"] = "worker_update"
+    state["cleanup_required"] = False
+    state["worker_claim"] = ""
+    state["files_changed"] = []
+    state["verification_command"] = ""
+    state["verification_result"] = ""
+    state["submitted_at"] = ""
+    state["review"] = {}
+    state["reviewed_at"] = ""
+    state["gate_attempt"] = 0
+    clear_completion_certification(state)
+    clear_transient_routing_fields(state)
+    mark_dispatch_pending(state, "worker")
+
+
+def certify_cleanup_ready_state(state: dict, timestamp: str) -> None:
+    completion = build_completion_certification(state, timestamp)
+    certification = state.get("certification") if isinstance(state.get("certification"), dict) else {}
+    certification["completion"] = completion
+    state["certification"] = certification
+    state["certification_hash"] = compute_certification_hash(completion)
+
+
+def update_for_complete(state: dict, args: argparse.Namespace, timestamp: str) -> None:
     require(args.actor == "watcher", "Only the watcher may complete.")
     require(state.get("status") == APPROVED_STATUS, "Completion requires an approved review.")
     require_dispatch_authority(state, "watcher", "Watcher complete")
@@ -183,13 +217,20 @@ def update_for_complete(state: dict, args: argparse.Namespace, _: str) -> None:
     state["next_action"] = "complete"
     state["cleanup_required"] = True
     clear_transient_routing_fields(state)
-    completion = build_completion_certification(state, _)
-    certification = state.get("certification") if isinstance(state.get("certification"), dict) else {}
-    certification["completion"] = completion
-    state["certification"] = certification
-    state["certification_hash"] = compute_certification_hash(completion)
     state["dispatch_status"] = IDLE_STATUS
     state["last_dispatch"] = {}
+
+    decision = loop_decision(state)
+    if decision.get("action") == "continue":
+        reset_for_next_loop_iteration(state, decision["next_iteration"])
+        return
+
+    if decision.get("action") == "stop":
+        loop = state.get("loop")
+        if isinstance(loop, dict):
+            loop["stop_reason"] = decision.get("reason", "")
+
+    certify_cleanup_ready_state(state, timestamp)
 
 
 def trace_line(args: argparse.Namespace, state: dict) -> str:
@@ -243,6 +284,7 @@ def main() -> int:
                 action=args.action,
                 expected_version=args.expected_version,
                 apply_transition=lambda current_state, timestamp: update_for_complete(current_state, args, timestamp),
+                progress_transition=progress_transition,
             )
     except StaleStateVersionError as error:
         fail(str(error))

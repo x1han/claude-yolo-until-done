@@ -35,9 +35,9 @@ def clear_completion_certification(state: dict) -> None:
     state["certification_hash"] = ""
 
 
-def build_cleanup_ready_state_snapshot(state: dict) -> dict:
+def build_cleanup_ready_state_snapshot(state: dict, *, schema_version: int = 2) -> dict:
     review = state.get("review") if isinstance(state.get("review"), dict) else {}
-    return {
+    snapshot = {
         "status": state.get("status", ""),
         "task_id": state.get("task_id", ""),
         "task_title": state.get("task_title", ""),
@@ -56,6 +56,20 @@ def build_cleanup_ready_state_snapshot(state: dict) -> dict:
         "review_required_rework": list(review.get("required_rework", [])),
         "review_acceptance_basis": list(review.get("acceptance_basis", [])),
     }
+    if schema_version >= 2:
+        loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+        snapshot.update(
+            {
+                "mode": state.get("mode", "acyclic"),
+                "loop_enabled": loop.get("enabled"),
+                "loop_iteration": loop.get("iteration"),
+                "loop_max_iterations": loop.get("max_iterations"),
+                "loop_stop_on_convergence": loop.get("stop_on_convergence"),
+                "loop_converged": loop.get("converged"),
+                "loop_stop_reason": loop.get("stop_reason", ""),
+            }
+        )
+    return snapshot
 
 
 def build_completion_certification(state: dict, timestamp: str) -> dict:
@@ -64,6 +78,7 @@ def build_completion_certification(state: dict, timestamp: str) -> dict:
         "status": COMPLETION_CERTIFICATION_OK,
         "certified_at": timestamp,
         "cleanup_state": READY_FOR_CLEANUP_STATUS,
+        "cleanup_ready_state_schema": 2,
         "cleanup_ready_state_hash": compute_certification_hash(build_cleanup_ready_state_snapshot(state)),
         "task_id": state.get("task_id", ""),
         "review_verdict": review.get("verdict", ""),
@@ -81,7 +96,10 @@ def completion_certification_checks(state: dict) -> dict[str, object]:
     expected_hash = str(state.get("certification_hash", "")).strip()
     cleanup_ready_state_hash = str(completion.get("cleanup_ready_state_hash", "")).strip()
     status = state.get("status")
-    current_ready_state_hash = compute_certification_hash(build_cleanup_ready_state_snapshot(state))
+    snapshot_schema = completion.get("cleanup_ready_state_schema", 1)
+    if not isinstance(snapshot_schema, int) or isinstance(snapshot_schema, bool) or snapshot_schema < 1:
+        snapshot_schema = 1
+    current_ready_state_hash = compute_certification_hash(build_cleanup_ready_state_snapshot(state, schema_version=snapshot_schema))
     require_ready_state_match = status == READY_FOR_CLEANUP_STATUS
     return {
         "completion": completion,

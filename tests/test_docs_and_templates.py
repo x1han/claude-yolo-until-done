@@ -80,6 +80,27 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertIn("claude -p", skill)
         self.assertIn("claude -p", runtime)
 
+    def test_docs_describe_loop_mode_usage_and_stop_policy(self) -> None:
+        readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
+        quickstart = (SKILL_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        required_inputs = (SKILL_ROOT / "policy" / "required-inputs.md").read_text(encoding="utf-8")
+        for body in (readme, quickstart):
+            self.assertIn("--mode loop", body)
+            self.assertIn("--loop-max-iterations", body)
+            self.assertIn("--loop-stop-on-convergence", body)
+            self.assertIn("A+B", body)
+            self.assertIn("either stop condition", body)
+            self.assertIn("continue-run", body)
+            self.assertIn("mode/config", body)
+        for body in (skill, required_inputs):
+            self.assertIn("--mode loop", body)
+            self.assertIn("--loop-max-iterations", body)
+            self.assertIn("--loop-stop-on-convergence", body)
+            self.assertIn("A+B", body)
+            self.assertIn("either stop condition", body)
+            self.assertIn("mode/config", body)
+
     def test_docs_describe_grill_first_then_yolo_usage(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
         quickstart = (SKILL_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")

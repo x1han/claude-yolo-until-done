@@ -13,6 +13,8 @@ A new run requires all of following:
 
 In this branch, preflight should bootstrap run root before ordinary execution continues.
 
+Default execution mode is acyclic. To repeat the same approved plan, choose loop mode at startup with `--mode loop` and at least one stop policy: `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. A+B uses either stop condition.
+
 ## Continue run
 
 A continue-run requires all of following:
@@ -21,6 +23,8 @@ A continue-run requires all of following:
 - one approved implementation plan, typically under `docs/plan.md`
 - `<run-root>/state.json` where default example run root is `.yolo/`
 - `<run-root>/trace.md`
+
+Continue-run must use the same mode/config already stored in `state.json`; mode/config drift must fail closed before execution resumes.
 
 Durable run root must identify:
 

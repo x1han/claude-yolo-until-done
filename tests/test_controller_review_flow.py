@@ -22,6 +22,172 @@ RUN_GATE_PATH = SKILL_ROOT / "hooks" / "run_gate.py"
 
 
 class ControllerReviewFlowTest(unittest.TestCase):
+    def run_loop_iteration(self, project_dir: Path, run_root: Path, expected_versions: tuple[int, int, int], *, converged: bool = False) -> dict:
+        submit_version, review_version, complete_version = expected_versions
+        submit_command = [
+            sys.executable,
+            str(CONTROLLER_PATH),
+            "--run-root",
+            str(run_root),
+            "--actor",
+            "worker",
+            "--action",
+            "submit",
+            "--expected-version",
+            str(submit_version),
+            "--worker-claim",
+            "Implemented loop iteration.",
+            "--files-changed",
+            "workflow/controller.py",
+            "--verification-command",
+            "python -m unittest tests.test_controller_review_flow",
+            "--verification-result",
+            "pass",
+        ]
+        if converged:
+            submit_command.append("--loop-converged")
+        submit = subprocess.run(
+            submit_command,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(submit.returncode, 0, submit.stderr)
+
+        approve = subprocess.run(
+            [
+                sys.executable,
+                str(CONTROLLER_PATH),
+                "--run-root",
+                str(run_root),
+                "--actor",
+                "watcher",
+                "--action",
+                "review",
+                "--expected-version",
+                str(review_version),
+                "--verdict",
+                "approve",
+                "--scope-checked",
+                "workflow/controller.py",
+                "--acceptance-basis",
+                "Loop iteration satisfies the approved plan.",
+            ],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(approve.returncode, 0, approve.stderr)
+
+        complete = subprocess.run(
+            [
+                sys.executable,
+                str(CONTROLLER_PATH),
+                "--run-root",
+                str(run_root),
+                "--actor",
+                "watcher",
+                "--action",
+                "complete",
+                "--expected-version",
+                str(complete_version),
+            ],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(complete.returncode, 0, complete.stderr)
+        return json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+
+    def bootstrap_loop_run(self, project_dir: Path, run_root: Path, *, max_iterations: int | None = None, stop_on_convergence: bool = False) -> None:
+        spec_path = project_dir / "spec.md"
+        plan_path = project_dir / "plan.md"
+        spec_path.write_text("# Spec\nLoop mode repeats the approved plan until stop policy fires.\n", encoding="utf-8")
+        plan_path.write_text("# Plan\n## Tasks\n1. Complete one acyclic iteration.\n", encoding="utf-8")
+        command = [
+            sys.executable,
+            str(BOOTSTRAP_PATH),
+            "--spec",
+            str(spec_path),
+            "--plan",
+            str(plan_path),
+            "--run-root",
+            str(run_root),
+            "--goal",
+            "Repeat approved work until loop policy stops.",
+            "--success-criterion",
+            "each approved iteration either schedules the next worker or stops for cleanup.",
+            "--mode",
+            "loop",
+        ]
+        if max_iterations is not None:
+            command.extend(["--loop-max-iterations", str(max_iterations)])
+        if stop_on_convergence:
+            command.append("--loop-stop-on-convergence")
+        bootstrap = subprocess.run(command, cwd=project_dir, capture_output=True, text=True, check=False)
+        self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+    def test_loop_complete_schedules_next_worker_iteration_before_max_iterations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.bootstrap_loop_run(project_dir, run_root, max_iterations=2)
+
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            state["gate_attempt"] = 4
+            (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            state = self.run_loop_iteration(project_dir, run_root, (1, 2, 3))
+
+            self.assertEqual(state["status"], "active")
+            self.assertEqual(state["owner"], "worker")
+            self.assertEqual(state["next_action"], "worker_update")
+            self.assertFalse(state["cleanup_required"])
+            self.assertEqual(state["loop"]["iteration"], 2)
+            self.assertEqual(state["loop"]["stop_reason"], "")
+            self.assertEqual(state["requested_role"], "worker")
+            self.assertEqual(state["dispatch_status"], "running")
+            self.assertEqual(state["dispatch_claim"]["owner"], "worker:gate-task-001:3")
+            self.assertEqual(state["last_dispatch"]["role"], "worker")
+            self.assertEqual(state["gate_attempt"], 0)
+            self.assertEqual(state["review"], {})
+            self.assertEqual(state["worker_claim"], "")
+            self.assertEqual(state["verification_command"], "")
+            self.assertEqual(state["verification_result"], "")
+
+    def test_loop_complete_stops_at_max_iterations_and_records_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.bootstrap_loop_run(project_dir, run_root, max_iterations=1)
+
+            state = self.run_loop_iteration(project_dir, run_root, (1, 2, 3))
+
+            self.assertEqual(state["status"], "ready_for_cleanup")
+            self.assertEqual(state["owner"], "watcher")
+            self.assertEqual(state["next_action"], "complete")
+            self.assertTrue(state["cleanup_required"])
+            self.assertEqual(state["dispatch_status"], "idle")
+            self.assertEqual(state["last_dispatch"], {})
+            self.assertEqual(state["loop"]["iteration"], 1)
+            self.assertEqual(state["loop"]["stop_reason"], "max_iterations")
+
+    def test_loop_complete_stops_on_convergence_and_records_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.bootstrap_loop_run(project_dir, run_root, stop_on_convergence=True)
+
+            state = self.run_loop_iteration(project_dir, run_root, (1, 2, 3), converged=True)
+
+            self.assertEqual(state["status"], "ready_for_cleanup")
+            self.assertTrue(state["cleanup_required"])
+            self.assertEqual(state["loop"]["iteration"], 1)
+            self.assertEqual(state["loop"]["stop_reason"], "converged")
+
     def test_no_human_run_rejects_need_human(self) -> None:
         state = {
             "allow_need_human": False,

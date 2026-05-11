@@ -89,6 +89,8 @@ Worker may submit only with fresh verification evidence.
 
 Watcher must review before completion and must record structured review payload.
 
+Default mode is acyclic. Loop mode is selected only at preflight/bootstrap with `--mode loop` plus `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. A+B uses either stop condition, and continue-run must fail closed on mode/config drift.
+
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 
 ## Hook Requirement

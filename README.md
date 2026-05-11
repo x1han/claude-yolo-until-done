@@ -93,6 +93,22 @@ That creates:
 - `<run-root>/state.json`
 - `<run-root>/trace.md`
 
+Default execution mode is acyclic: one approved plan run reaches cleanup. Loop mode repeats the same acyclic core until one stop policy fires:
+
+```bash
+python <skill-repo>/workflow/bootstrap.py \
+  --spec <output-folder>/docs/spec.md \
+  --plan <output-folder>/docs/plan.md \
+  --run-root <output-folder>/.yolo \
+  --goal "Improve until loop policy stops." \
+  --success-criterion "Each iteration is reviewed before the next starts." \
+  --mode loop \
+  --loop-max-iterations 10 \
+  --loop-stop-on-convergence
+```
+
+`--loop-max-iterations` is stop policy A, `--loop-stop-on-convergence` is stop policy B, and A+B uses either stop condition. For continue-run, supplied mode/config must match existing `state.json` or preflight fails closed.
+
 ## Install Hooks
 
 ```bash

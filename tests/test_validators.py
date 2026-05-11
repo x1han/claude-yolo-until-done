@@ -468,6 +468,138 @@ class ValidatorsTest(unittest.TestCase):
             self.assertFalse(report["passed"])
             self.assertIn("completion_certification_hash_matches", {item["name"] for item in report["failures"]})
 
+    def legacy_completion_certification(self, state: dict) -> dict:
+        review = state.get("review") if isinstance(state.get("review"), dict) else {}
+        snapshot = {
+            "status": state.get("status", ""),
+            "task_id": state.get("task_id", ""),
+            "task_title": state.get("task_title", ""),
+            "owner": state.get("owner", ""),
+            "next_action": state.get("next_action", ""),
+            "cleanup_required": state.get("cleanup_required"),
+            "worker_claim": state.get("worker_claim", ""),
+            "files_changed": list(state.get("files_changed", [])),
+            "verification_command": state.get("verification_command", ""),
+            "verification_result": state.get("verification_result", ""),
+            "submitted_at": state.get("submitted_at", ""),
+            "reviewed_at": state.get("reviewed_at", ""),
+            "review_verdict": review.get("verdict", ""),
+            "review_scope_checked": list(review.get("scope_checked", [])),
+            "review_problems": list(review.get("problems", [])),
+            "review_required_rework": list(review.get("required_rework", [])),
+            "review_acceptance_basis": list(review.get("acceptance_basis", [])),
+        }
+        payload = {
+            "status": "ok",
+            "certified_at": "2026-05-01T00:01:30Z",
+            "cleanup_state": "ready_for_cleanup",
+            "cleanup_ready_state_hash": compute_certification_hash(snapshot),
+            "task_id": state.get("task_id", ""),
+            "review_verdict": review.get("verdict", ""),
+            "files_changed": list(state.get("files_changed", [])),
+        }
+        return {
+            "certification": {"completion": payload},
+            "certification_hash": compute_certification_hash(payload),
+        }
+
+    def test_completion_validator_accepts_legacy_cleanup_certification_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = {
+                "goal": "Fix it.",
+                "success_criteria": ["It works."],
+                "status": "ready_for_cleanup",
+                "task_id": "task-001",
+                "task_title": "Fix parser handling",
+                "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                "worker_claim": "Updated parser handling.",
+                "files_changed": ["src/app.py"],
+                "verification_command": "pytest -q",
+                "verification_result": "passed: 1 passed",
+                "submitted_at": "2026-05-01T00:00:00Z",
+                "review": {
+                    "verdict": "approve",
+                    "scope_checked": ["src/app.py"],
+                    "problems": [],
+                    "required_rework": [],
+                    "acceptance_basis": ["verification passed freshly"],
+                },
+                "reviewed_at": "2026-05-01T00:01:00Z",
+                "owner": "watcher",
+                "next_action": "complete",
+                "cleanup_required": True,
+                "plan_path": "docs/plan.md",
+                "spec_path": "docs/spec.md",
+                "updated_at": "2026-05-01T00:01:00Z",
+            }
+            state.update(self.legacy_completion_certification(state))
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated parser handling.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+
+            report = validate_completion(run_root)
+
+            self.assertTrue(report["passed"])
+
+    def test_completion_validator_rejects_loop_stop_reason_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = {
+                "goal": "Fix it.",
+                "success_criteria": ["It works."],
+                "status": "ready_for_cleanup",
+                "task_id": "task-001",
+                "task_title": "Fix parser handling",
+                "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+                "worker_claim": "Updated parser handling.",
+                "files_changed": ["src/app.py"],
+                "verification_command": "pytest -q",
+                "verification_result": "passed: 1 passed",
+                "submitted_at": "2026-05-01T00:00:00Z",
+                "review": {
+                    "verdict": "approve",
+                    "scope_checked": ["src/app.py"],
+                    "problems": [],
+                    "required_rework": [],
+                    "acceptance_basis": ["verification passed freshly"],
+                },
+                "reviewed_at": "2026-05-01T00:01:00Z",
+                "owner": "watcher",
+                "next_action": "complete",
+                "cleanup_required": True,
+                "mode": "loop",
+                "loop": {
+                    "enabled": True,
+                    "iteration": 3,
+                    "max_iterations": 3,
+                    "stop_on_convergence": False,
+                    "converged": False,
+                    "stop_reason": "max_iterations",
+                },
+                "plan_path": "docs/plan.md",
+                "spec_path": "docs/spec.md",
+                "updated_at": "2026-05-01T00:01:00Z",
+            }
+            state.update(self.completion_certification(state))
+            state["loop"]["stop_reason"] = "converged"
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+            (run_root / "trace.md").write_text(
+                "- 2026-05-01T00:00:00Z worker submit: claim=Updated parser handling.\n"
+                "- 2026-05-01T00:01:00Z watcher review: approve; scope_checked=src/app.py\n"
+                "- 2026-05-01T00:02:00Z watcher complete\n",
+                encoding="utf-8",
+            )
+
+            report = validate_completion(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("completion_certification_cleanup_ready_state_hash_matches", {item["name"] for item in report["failures"]})
+
     def test_completion_validator_accepts_ready_for_cleanup_from_authoritative_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)

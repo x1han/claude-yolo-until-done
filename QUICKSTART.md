@@ -38,6 +38,22 @@ python <skill-repo>/workflow/bootstrap.py \
   --success-criterion "Workflow reaches valid completion."
 ```
 
+Default is acyclic mode. For loop mode, bootstrap with a stop policy:
+
+```bash
+python <skill-repo>/workflow/bootstrap.py \
+  --spec <output-folder>/docs/spec.md \
+  --plan <output-folder>/docs/plan.md \
+  --run-root <output-folder>/.yolo \
+  --goal "Improve until loop policy stops." \
+  --success-criterion "Each iteration is reviewed before the next starts." \
+  --mode loop \
+  --loop-max-iterations 10 \
+  --loop-stop-on-convergence
+```
+
+`--loop-max-iterations` is stop policy A, `--loop-stop-on-convergence` is stop policy B, and A+B uses either stop condition. On continue-run, preflight rejects mode/config drift from existing `state.json`.
+
 ## 4. Run Preflight On Skill Load
 
 When skill is loaded, run preflight first:
