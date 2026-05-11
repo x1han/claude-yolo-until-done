@@ -25,7 +25,7 @@ This file governs the inner software repository layer at `/datf/hanxi/software/c
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **claude-yolo-until-done** (649 symbols, 1203 relationships, 55 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **claude-yolo-until-done** (1467 symbols, 3077 relationships, 128 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
