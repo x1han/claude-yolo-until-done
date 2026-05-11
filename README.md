@@ -15,8 +15,8 @@ For shortest operator path, see [QUICKSTART.md](QUICKSTART.md).
 
 Use this workflow only when all of following are true:
 
-- approved spec already exists
-- approved implementation plan already exists
+- approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, or both `--spec` and `--plan` name existing approved artifacts
+- approved implementation plan is execution-ready
 - Claude Code hooks are available for execution phase
 - Claude Code is launched with `--dangerously-skip-permissions` for execution phase
 - session is interactive Claude Code, not headless `claude -p` print mode
@@ -75,15 +75,17 @@ Runtime status model is intentionally small:
 - `approved`
 - `ready_for_cleanup`
 
-## Bootstrap
+## Preflight And Bootstrap
+
+Default new-run startup uses built-in grill-storm docs under `<project>/docs/`. Run `workflow/init_grill_docs.py` when those docs do not exist, iterate with `workflow/grill_storm.py --status` until `docs/spec.md` and `docs/plan.md` are approved, then run `workflow/preflight.py` without `--spec/--plan` to execute the default docs.
+
+Existing approved spec/plan files are still supported by passing both `--spec` and `--plan`.
 
 From target project root:
 
 ```bash
-python <skill-repo>/workflow/bootstrap.py \
-  --spec <output-folder>/docs/spec.md \
-  --plan <output-folder>/docs/plan.md \
-  --run-root <output-folder>/.yolo \
+python <skill-repo>/workflow/preflight.py \
+  --project-dir <output-folder> \
   --goal "Fix requested problem and verify it." \
   --success-criterion "Requested files are updated exactly as required." \
   --success-criterion "Verification command passes freshly." \
@@ -98,10 +100,8 @@ That creates:
 Default execution mode is acyclic: one approved plan run reaches cleanup. Loop mode repeats the same acyclic core until one stop policy fires:
 
 ```bash
-python <skill-repo>/workflow/bootstrap.py \
-  --spec <output-folder>/docs/spec.md \
-  --plan <output-folder>/docs/plan.md \
-  --run-root <output-folder>/.yolo \
+python <skill-repo>/workflow/preflight.py \
+  --project-dir <output-folder> \
   --goal "Improve until loop policy stops." \
   --success-criterion "Each iteration is reviewed before the next starts." \
   --mode loop \

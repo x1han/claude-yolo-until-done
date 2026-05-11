@@ -12,9 +12,26 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 GRILL_STORM_PATH = SKILL_ROOT / "workflow" / "grill_storm.py"
 VALIDATE_GRILL_DOCS_PATH = SKILL_ROOT / "workflow" / "validate_grill_docs.py"
 PREFLIGHT_PATH = SKILL_ROOT / "workflow" / "preflight.py"
+INIT_GRILL_DOCS_PATH = SKILL_ROOT / "workflow" / "init_grill_docs.py"
 
 
 class GrillStormRuntimeTest(unittest.TestCase):
+    def runtime_env(self, project_dir: Path) -> dict[str, str]:
+        env = dict(os.environ)
+        env["CLAUDE_CODE_ENTRYPOINT"] = "cli"
+        bin_dir = project_dir / ".test-bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        ps_path = bin_dir / "ps"
+        ps_path.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('  PID  PPID ARGS')\n"
+            "print('123 1 claude --dangerously-skip-permissions')\n",
+            encoding="utf-8",
+        )
+        ps_path.chmod(0o755)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        return env
+
     def write_docs(
         self,
         project_dir: Path,
@@ -135,6 +152,169 @@ class GrillStormRuntimeTest(unittest.TestCase):
             self.assertEqual(payload["status"], "ready_for_execution")
             self.assertEqual(payload["spec"], str(project_dir / "docs" / "spec.md"))
             self.assertEqual(payload["plan"], str(project_dir / "docs" / "plan.md"))
+
+    def test_preflight_defaults_to_ready_grill_storm_docs_when_spec_plan_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [x] Question: review scope\n  Answer: inspect supplied code changes\n  Impact: watcher must review current diff only\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Code review loop should use built-in grill-storm docs.\n\n### 2026-05-11 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Plan contains one repeatable review task with verification.\n",
+            )
+            (project_dir / "docs" / "plan.md").write_text(
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Code review iteration\nReview the current code changes.\n\nVerify: watcher records review evidence for this iteration.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Run five code-review iterations.",
+                    "--success-criterion",
+                    "five watcher reviews are recorded",
+                    "--mode",
+                    "loop",
+                    "--loop-max-iterations",
+                    "5",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["spec_path"], "docs/spec.md")
+            self.assertEqual(state["plan_path"], "docs/plan.md")
+            self.assertEqual(state["mode"], "loop")
+            self.assertEqual(state["loop"]["max_iterations"], 5)
+
+    def test_preflight_without_spec_plan_reports_missing_grill_storm_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Run five code-review iterations.",
+                    "--success-criterion",
+                    "five watcher reviews are recorded",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("grill-storm planning docs are not initialized", result.stderr)
+            self.assertIn("workflow/init_grill_docs.py", result.stderr)
+            self.assertFalse((project_dir / ".yolo" / "state.json").exists())
+
+    def test_preflight_without_spec_plan_reports_grill_storm_status_for_draft_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(INIT_GRILL_DOCS_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--request",
+                    "Run five code-review iterations.",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Run five code-review iterations.",
+                    "--success-criterion",
+                    "five watcher reviews are recorded",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
+            self.assertIn("next_actor", result.stderr)
+            self.assertFalse((project_dir / ".yolo" / "state.json").exists())
+
+    def test_preflight_explicit_default_docs_paths_still_require_grill_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(INIT_GRILL_DOCS_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--request",
+                    "Run review.",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(project_dir / "docs" / "spec.md"),
+                    "--plan",
+                    str(project_dir / "docs" / "plan.md"),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Run review.",
+                    "--success-criterion",
+                    "review passes",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
 
     def test_preflight_rejects_new_run_when_grill_docs_are_not_execution_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

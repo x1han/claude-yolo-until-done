@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-converged", action="store_true")
 
     parser.add_argument("--verdict", choices=("approve", "rework_required"))
-    parser.add_argument("--scope-checked", nargs="*")
+    parser.add_argument("--scope-checked", nargs="*", action="append", default=[])
     parser.add_argument("--problem", action="append", default=[])
     parser.add_argument("--required-rework", action="append", default=[])
     parser.add_argument("--acceptance-basis", action="append", default=[])
@@ -136,9 +136,10 @@ def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> 
 
 
 def build_review_payload(args: argparse.Namespace) -> dict:
+    scope_checked = [item for group in args.scope_checked for item in group]
     return {
         "verdict": args.verdict,
-        "scope_checked": list(args.scope_checked or []),
+        "scope_checked": scope_checked,
         "problems": list(args.problem),
         "required_rework": list(args.required_rework),
         "acceptance_basis": list(args.acceptance_basis),

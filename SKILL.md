@@ -34,7 +34,9 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 ## Startup Contract
 - Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
 - Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and ask user only when blocking high-impact gap remains.
-- New run: approved spec and plan exist, but `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
+- New run default: approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, pass `workflow/validate_grill_docs.py`, and `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
+- New run override: both `--spec` and `--plan` point to existing approved planning artifacts outside the default grill-storm docs.
+- Planning-needed run: if default grill-storm docs are missing or draft, stop before bootstrap and report the planning action needed.
 - Continue run: `.yolo/state.json` and `.yolo/trace.md` already exist. preflight should verify them, reinstall current local hook set if needed, and resume from durable state.
 - Invalid run: if skill lacks either approved planning artifacts for new run, or coherent durable state for continue-run path, it must fail closed and stop.
 - Legacy local hook settings are not blocker for new run. Install step is idempotent and should replace same-run claude-yolo hook groups with current contract.

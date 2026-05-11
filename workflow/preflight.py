@@ -121,6 +121,58 @@ def validate_grill_storm_bundle_if_present(project_dir: Path, spec_path: Path, p
 
 
 
+def default_grill_storm_paths(project_dir: Path) -> tuple[Path, Path]:
+    docs_root = project_dir / "docs"
+    return (docs_root / "spec.md").resolve(), (docs_root / "plan.md").resolve()
+
+
+
+def resolve_planning_paths(project_dir: Path, spec_arg: str | None, plan_arg: str | None) -> tuple[Path, Path, str]:
+    if bool(spec_arg) != bool(plan_arg):
+        raise SystemExit("--spec and --plan must be provided together, or both omitted to use default grill-storm docs.")
+    if spec_arg and plan_arg:
+        return Path(spec_arg).resolve(), Path(plan_arg).resolve(), "explicit"
+    spec_path, plan_path = default_grill_storm_paths(project_dir)
+    return spec_path, plan_path, "grill-storm"
+
+
+
+def grill_storm_status_text(project_dir: Path) -> str:
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve().parent / "grill_storm.py"), "--status", "--project-dir", str(project_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return (result.stdout or result.stderr).strip()
+
+
+
+def require_planning_inputs_ready(project_dir: Path, spec_path: Path, plan_path: Path, planning_source: str) -> None:
+    if planning_source == "grill-storm" and (not spec_path.exists() or not plan_path.exists()):
+        raise SystemExit(
+            "grill-storm planning docs are not initialized; run "
+            "workflow/init_grill_docs.py --project-dir <project> --request <request> before execution."
+        )
+
+    if not spec_path.exists():
+        raise SystemExit(f"Spec not found: {spec_path}")
+    if not plan_path.exists():
+        raise SystemExit(f"Plan not found: {plan_path}")
+
+    try:
+        validate_grill_storm_bundle_if_present(project_dir, spec_path, plan_path)
+    except SystemExit as error:
+        if planning_source != "grill-storm":
+            raise
+        status = grill_storm_status_text(project_dir)
+        detail = str(error)
+        if status:
+            detail = f"{detail}\ngrill-storm status: {status}"
+        raise SystemExit(detail) from error
+
+
+
 def validate_continue_run_paths(state: dict, project_dir: Path, spec_path: Path, plan_path: Path) -> None:
     expected_spec_path = state.get("spec_path")
     expected_plan_path = state.get("plan_path")
@@ -201,8 +253,8 @@ def validate_installed_hook_config(settings_path: Path, run_root_arg: str, state
 def main() -> int:
     parser = argparse.ArgumentParser(description="Classify and prepare a claude-yolo-until-done run before execution.")
     parser.add_argument("--project-dir", required=True, help="Target project directory")
-    parser.add_argument("--spec", required=True, help="Approved spec path")
-    parser.add_argument("--plan", required=True, help="Approved implementation plan path")
+    parser.add_argument("--spec", help="Approved spec path; omit with --plan to use default grill-storm docs")
+    parser.add_argument("--plan", help="Approved implementation plan path; omit with --spec to use default grill-storm docs")
     parser.add_argument("--run-root", default=".yolo", help="Run root relative to the project directory")
     parser.add_argument("--settings-file", default=".claude/settings.local.json", help="Settings file path relative to the project directory")
     parser.add_argument("--goal", required=True, help="Run goal")
@@ -227,18 +279,13 @@ def main() -> int:
         raise SystemExit(str(error)) from error
 
     project_dir = Path(args.project_dir).resolve()
-    spec_path = Path(args.spec).resolve()
-    plan_path = Path(args.plan).resolve()
+    spec_path, plan_path, planning_source = resolve_planning_paths(project_dir, args.spec, args.plan)
     run_root = (project_dir / args.run_root).resolve()
     settings_path = (project_dir / args.settings_file).resolve()
     bridge_path = Path(__file__).resolve().parent / "claude_hook_bridge.py"
     python_exe = Path(sys.executable).resolve()
 
-    if not spec_path.exists():
-        raise SystemExit(f"Spec not found: {spec_path}")
-    if not plan_path.exists():
-        raise SystemExit(f"Plan not found: {plan_path}")
-    validate_grill_storm_bundle_if_present(project_dir, spec_path, plan_path)
+    require_planning_inputs_ready(project_dir, spec_path, plan_path, planning_source)
 
     runtime = verify_runtime()
     classification = classify_run(run_root)

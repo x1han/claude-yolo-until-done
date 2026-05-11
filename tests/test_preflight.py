@@ -1274,6 +1274,75 @@ class PreflightTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("state_version", result.stderr)
 
+    def test_preflight_explicit_external_spec_plan_still_bootstraps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec = project_dir / "external-spec.md"
+            plan = project_dir / "external-plan.md"
+            spec.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan.write_text(
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Review changes\nInspect changes.\n\nVerify: reviewer records evidence.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec),
+                    "--plan",
+                    str(plan),
+                    "--run-root",
+                    ".yolo",
+                    "--goal",
+                    "Run review.",
+                    "--success-criterion",
+                    "review passes",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["spec_path"], "external-spec.md")
+            self.assertEqual(state["plan_path"], "external-plan.md")
+
+    def test_preflight_rejects_only_spec_without_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec = project_dir / "spec.md"
+            spec.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PREFLIGHT_PATH),
+                    "--project-dir",
+                    str(project_dir),
+                    "--spec",
+                    str(spec),
+                    "--goal",
+                    "Run review.",
+                    "--success-criterion",
+                    "review passes",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=self.runtime_env(project_dir),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--spec and --plan must be provided together", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

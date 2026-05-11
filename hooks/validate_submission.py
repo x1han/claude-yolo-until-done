@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+HOOKS_DIR = Path(__file__).resolve().parent
+WORKFLOW_DIR = HOOKS_DIR.parent / "workflow"
+if str(WORKFLOW_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_DIR))
+
 from common import add_check, base_report, load_state, validate_required_state_fields
+from orchestrator import LIVE_CLAIM_STATUSES
 
 
 REQUIRED_REVIEW_STATUS = "needs_review"
@@ -33,7 +42,7 @@ def run(run_root):
     add_check(
         report,
         "dispatch_consumed_for_review",
-        state.get("dispatch_status") == "completed",
+        state.get("dispatch_status") in LIVE_CLAIM_STATUSES,
         f"dispatch_status={state.get('dispatch_status')} last_dispatch={state.get('last_dispatch')}",
     )
     if submission_certification.get("status") == "ok":

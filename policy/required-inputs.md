@@ -6,9 +6,8 @@ Before workflow starts, first classify run type.
 
 A new run requires all of following:
 
-- one approved spec, typically under `docs/spec.md`
-- one approved implementation plan, typically under `docs/plan.md`
-- if grill-storm planning is in use, planning bundle under `docs/` should also include `intent.md`, `open-questions.md`, and `decisions.md`
+- default path: approved grill-storm docs under `docs/spec.md` and `docs/plan.md`, plus `docs/intent.md`, `docs/open-questions.md`, and `docs/decisions.md`
+- override path: both `--spec` and `--plan` point to existing approved planning artifacts
 - no existing durable run bundle at `<run-root>/state.json` and `<run-root>/trace.md`
 
 In this branch, preflight should bootstrap run root before ordinary execution continues.
