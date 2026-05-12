@@ -38,13 +38,16 @@ These 5 files are external brain. Agent talk should not rely only on chat histor
 Use built-in grill-storm authoring flow:
 
 - combines `grill-me` style gap finding with brainstorming-style internal challenge before asking user
-- `Interviewer` reads `intent.md` and `open-questions.md`
-- `Planner` reads `intent.md`, `decisions.md`, and `spec.md`
+- `Muse` reads `intent.md` and `open-questions.md`
+- `Logos` reads `intent.md`, `decisions.md`, and `spec.md`
 - after each round, update intent, open questions, decisions, spec, or plan instead of relying on memory
+- converge in one or two high-quality internal rounds by requiring candidates, critique, evidence, rejected alternatives, and a human review packet
 - return `human_dialogue` when agents reach consensus or `joint_uncertainty`
 - require human-approved spec before plan authoring and human-approved plan before execution
 
 Use `intent.md`, `open-questions.md`, and `decisions.md` as primary working state. `spec.md` should hold stable requirements only. `plan.md` should become execution-ready only after spec is stable.
+
+High-quality autonomy comes from constrained artifacts and validation, not long agent chatter. Muse should produce 2-3 candidate directions with tradeoffs and falsifiers; Logos should critique those candidates, select one recommendation, or name one blocking uncertainty. By default, two internal rounds is the limit before the main session prints a concise human review packet. Local research notes live at `../workflow/reference/autonomous-debate-patterns.md`.
 
 Initialize bundle from target project root:
 
@@ -153,6 +156,21 @@ python <skill-repo>/hooks/run_gate.py --validator completion --run-root <output-
 Role agents are scoped per `.yolo/` run. Each role should be created once per run and then continued for later dispatches to that same role.
 
 `agent_sessions.json` stores routing metadata only. It does not replace `state.json` and does not decide workflow status.
+
+Dispatch payloads include `session_action`, `agent_id`, and runtime routing metadata. `session_action: create` means create the role agent once for that generation. `session_action: reuse` means resume/send to exactly that existing `agent_id`; do not create a fresh role agent with new context. Replacement is explicit only and creates a new generation through the replacement flow.
+
+```json
+{
+  "session_action": "reuse",
+  "agent_id": "logos-1-example",
+  "agent_runtime": {
+    "tool": "Agent",
+    "action": "resume_by_agent_id",
+    "agent_id": "logos-1-example",
+    "must_resume_exact_agent_id": true
+  }
+}
+```
 
 Each role keeps a role lab notebook at `agents/<role>-log.md`. Entries are concise experimental records: hypothesis, actions, observations, result, next. Summaries are compression cache only; the notebook is primary durable context.
 

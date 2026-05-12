@@ -7,6 +7,9 @@ import re
 import sys
 from pathlib import Path
 
+from agent_sessions import PLANNING_ROLE_NAMES
+from human_approvals import HUMAN_APPROVAL_SOURCES, verified_human_approval_sources
+
 REQUIRED_DOCS = {
     "intent": "intent.md",
     "open_questions": "open-questions.md",
@@ -83,7 +86,7 @@ def field_value(text: str, field: str, *, bullet: bool = False, normalize: bool 
 
 
 def internal_rounds(decisions: str) -> dict[str, int]:
-    rounds = {"interviewer": 0, "planner": 0}
+    rounds = {role: 0 for role in PLANNING_ROLE_NAMES}
     for block in decision_blocks(decisions):
         if field_value(block, "Status", bullet=True, normalize=True) != "accepted":
             continue
@@ -105,8 +108,14 @@ def accepted_decision_count(decisions: str, *, actor: str, source: str) -> int:
     return count
 
 
-def has_human_intent_approval(decisions: str) -> bool:
-    return accepted_decision_count(decisions, actor="human", source="consensus") > 0 or accepted_decision_count(decisions, actor="human", source="uncertainty") > 0
+def has_human_intent_approval(decisions: str, verified_sources: set[str]) -> bool:
+    return (
+        accepted_decision_count(decisions, actor="human", source="consensus") > 0
+        and "consensus" in verified_sources
+    ) or (
+        accepted_decision_count(decisions, actor="human", source="uncertainty") > 0
+        and "uncertainty" in verified_sources
+    )
 
 
 def plan_quality_errors(plan: str) -> list[str]:
@@ -199,7 +208,19 @@ def consensus_items(decisions: str, *, limit: int = 3) -> list[dict[str, object]
 
 
 def has_joint_uncertainty(decisions: str) -> bool:
-    return accepted_decision_count(decisions, actor="planner", source="joint-uncertainty") > 0
+    return accepted_decision_count(decisions, actor="logos", source="joint-uncertainty") > 0
+
+
+def human_only_source_errors(decisions: str) -> list[str]:
+    errors: list[str] = []
+    for block in decision_blocks(decisions):
+        source = field_value(block, "Source", bullet=True, normalize=True)
+        if source not in HUMAN_APPROVAL_SOURCES:
+            continue
+        actor = field_value(block, "Actor", bullet=True, normalize=True)
+        if actor and actor != "human":
+            errors.append(f"decisions.md has human-only source {source} recorded by {actor}")
+    return errors
 
 
 def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, object]:
@@ -215,19 +236,25 @@ def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[
         if has_template_only_lines(body):
             errors.append(f"{REQUIRED_DOCS[key]} still contains template-only placeholders")
 
+    verified_sources = verified_human_approval_sources(project_dir)
     rounds = internal_rounds(bundle["decisions"])
-    if rounds["interviewer"] < 1:
-        errors.append("decisions.md is missing accepted interviewer internal round")
-    if rounds["planner"] < 1:
-        errors.append("decisions.md is missing accepted planner internal round")
-    if not has_human_intent_approval(bundle["decisions"]):
-        errors.append("decisions.md is missing accepted human consensus or uncertainty resolution")
-    if accepted_decision_count(bundle["decisions"], actor="planner", source="spec-self-review") < 1:
+    if rounds["muse"] < 1:
+        errors.append("decisions.md is missing accepted muse internal round")
+    if rounds["logos"] < 1:
+        errors.append("decisions.md is missing accepted logos internal round")
+    errors.extend(human_only_source_errors(bundle["decisions"]))
+    if not has_human_intent_approval(bundle["decisions"], verified_sources):
+        errors.append("decisions.md is missing verified human consensus or uncertainty resolution")
+    if accepted_decision_count(bundle["decisions"], actor="logos", source="spec-self-review") < 1:
         errors.append("decisions.md is missing accepted Logos spec self-review")
     if accepted_decision_count(bundle["decisions"], actor="human", source="spec-review") < 1:
         errors.append("decisions.md is missing accepted human spec review")
+    elif "spec-review" not in verified_sources:
+        errors.append("human spec review is missing verified main-session approval")
     if accepted_decision_count(bundle["decisions"], actor="human", source="plan-review") < 1:
         errors.append("decisions.md is missing accepted human plan review")
+    elif "plan-review" not in verified_sources:
+        errors.append("human plan review is missing verified main-session approval")
 
     blockers = blocking_questions(bundle["open_questions"])
     if blockers:

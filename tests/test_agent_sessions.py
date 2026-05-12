@@ -66,7 +66,13 @@ class AgentSessionsTest(unittest.TestCase):
             second = resolve_role_session(run_root, "worker", "worker:gate-task-001:2", now="2026-05-11T00:01:00+00:00")
 
             self.assertEqual(first["action"], "create")
+            self.assertEqual(first["runtime"]["action"], "create")
+            self.assertEqual(first["runtime"]["agent_id"], first["agent_id"])
             self.assertEqual(second["action"], "reuse")
+            self.assertEqual(second["runtime"]["action"], "resume_by_agent_id")
+            self.assertEqual(second["runtime"]["agent_id"], first["agent_id"])
+            self.assertTrue(second["runtime"]["must_resume_exact_agent_id"])
+            self.assertFalse(second["runtime"]["replacement_allowed"])
             self.assertEqual(first["agent_id"], second["agent_id"])
             self.assertEqual(second["generation"], 1)
             registry = load_agent_sessions(run_root)
@@ -99,6 +105,9 @@ class AgentSessionsTest(unittest.TestCase):
             self.assertEqual(replacement["action"], "replace")
             self.assertEqual(replacement["generation"], 2)
             self.assertNotEqual(replacement["agent_id"], original["agent_id"])
+            self.assertEqual(replacement["runtime"]["action"], "create")
+            self.assertEqual(replacement["runtime"]["agent_id"], replacement["agent_id"])
+            self.assertFalse(replacement["runtime"]["replacement_allowed"])
             log_text = agent_log_path(run_root, "worker").read_text(encoding="utf-8")
             self.assertIn("replacement generation 2", log_text)
             self.assertIn("stored agent unavailable", log_text)
@@ -161,24 +170,24 @@ class AgentSessionsTest(unittest.TestCase):
             record = append_planning_round(
                 run_root,
                 {
-                    "role": "interviewer",
+                    "role": "muse",
                     "round": 1,
                     "status": "completed",
                     "docs_touched": ["docs/intent.md", "docs/decisions.md"],
                     "summary": "Confirmed execution gate ownership.",
                     "decisions_recorded": ["Preflight owns execution readiness."],
                     "questions_added": [],
-                    "next_recommendation": "Planner should compare validator placement options.",
+                    "next_recommendation": "Logos should compare validator placement options.",
                 },
                 now="2026-05-11T01:00:00+00:00",
             )
 
-            self.assertEqual(record["role"], "interviewer")
+            self.assertEqual(record["role"], "muse")
             self.assertEqual(record["round"], 1)
             rounds = load_planning_rounds(run_root)
             self.assertEqual(rounds[0]["summary"], "Confirmed execution gate ownership.")
             self.assertEqual(rounds[0]["recorded_at"], "2026-05-11T01:00:00+00:00")
-            log_text = agent_log_path(run_root, "interviewer").read_text(encoding="utf-8")
+            log_text = agent_log_path(run_root, "muse").read_text(encoding="utf-8")
             self.assertIn("planning round 1", log_text)
             self.assertIn("Confirmed execution gate ownership.", log_text)
 

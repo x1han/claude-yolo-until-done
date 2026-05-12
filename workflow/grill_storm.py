@@ -6,7 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-from validate_grill_docs import GrillDocsError, accepted_decision_count, approved_docs_report, blocking_questions, consensus_items, has_human_intent_approval, has_joint_uncertainty, internal_rounds, plan_quality_errors, read_bundle, status_value
+from human_approvals import verified_human_approval_sources
+from validate_grill_docs import GrillDocsError, accepted_decision_count, approved_docs_report, blocking_questions, consensus_items, has_human_intent_approval, has_joint_uncertainty, has_template_only_lines, internal_rounds, plan_quality_errors, read_bundle, status_value
 
 
 SPEC_REVIEW_READY_SECTIONS = ("## Problem", "## Acceptance Criteria")
@@ -21,7 +22,7 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
         return {
             "status": "needs_init",
             "human_allowed": False,
-            "next_actor": "interviewer",
+            "next_actor": "muse",
             "reason": str(error),
         }
 
@@ -36,28 +37,30 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
         }
 
     rounds = internal_rounds(bundle["decisions"])
-    if rounds["interviewer"] < 1:
+    if rounds["muse"] < 1:
         return {
             "status": "needs_internal_round",
-            "next_actor": "interviewer",
+            "next_actor": "muse",
             "human_allowed": False,
             "read": ["docs/intent.md", "docs/open-questions.md"],
             "write_any_of": ["docs/intent.md", "docs/open-questions.md", "docs/decisions.md"],
-            "reason": "interviewer internal round required before human question",
+            "reason": "muse internal round required before human question",
         }
-    if rounds["planner"] < 1:
+    if rounds["logos"] < 1:
         return {
             "status": "needs_internal_round",
-            "next_actor": "planner",
+            "next_actor": "logos",
             "human_allowed": False,
             "read": ["docs/intent.md", "docs/decisions.md", "docs/spec.md"],
             "write_any_of": ["docs/decisions.md", "docs/spec.md", "docs/plan.md"],
-            "reason": "planner internal challenge required before human question",
+            "reason": "logos internal challenge required before human question",
         }
 
     blockers = blocking_questions(bundle["open_questions"])
-    if not has_human_intent_approval(bundle["decisions"]):
-        items = consensus_items(bundle["decisions"])
+    items = consensus_items(bundle["decisions"])
+    joint_uncertainty = has_joint_uncertainty(bundle["decisions"])
+    verified_sources = verified_human_approval_sources(project_dir)
+    if not has_human_intent_approval(bundle["decisions"], verified_sources):
         if items:
             return {
                 "status": "human_dialogue",
@@ -68,7 +71,7 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
                 "recommended_answer": next((str(item["title"]) for item in items if item.get("recommended")), str(items[0]["title"])),
                 "source": "docs/decisions.md",
             }
-        if blockers and has_joint_uncertainty(bundle["decisions"]):
+        if blockers and joint_uncertainty:
             first = blockers[0]
             return {
                 "status": "human_dialogue",
@@ -80,6 +83,24 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
                 "source": "docs/open-questions.md",
                 "blocking_reason": first["raw"],
             }
+        if blockers:
+            first = blockers[0]
+            return {
+                "status": "ask_user",
+                "human_allowed": True,
+                "question": first["question"],
+                "recommended_answer": first["recommended_answer"],
+                "blocking_reason": first["raw"],
+                "max_questions": 1,
+            }
+        return {
+            "status": "needs_internal_round",
+            "next_actor": "logos",
+            "human_allowed": False,
+            "read": ["docs/intent.md", "docs/decisions.md", "docs/spec.md"],
+            "write_any_of": ["docs/decisions.md", "docs/spec.md", "docs/plan.md"],
+            "reason": "Muse/Logos must record consensus-candidate or joint-uncertainty before spec authoring",
+        }
 
     if blockers:
         first = blockers[0]
@@ -94,15 +115,26 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
 
     spec_status = status_value(bundle["spec"])
     plan_status = status_value(bundle["plan"])
-    spec_self_reviewed = accepted_decision_count(bundle["decisions"], actor="planner", source="spec-self-review") > 0
-    human_spec_reviewed = accepted_decision_count(bundle["decisions"], actor="human", source="spec-review") > 0
-    human_plan_reviewed = accepted_decision_count(bundle["decisions"], actor="human", source="plan-review") > 0
+    spec_self_reviewed = accepted_decision_count(bundle["decisions"], actor="logos", source="spec-self-review") > 0
+    human_spec_reviewed = (
+        accepted_decision_count(bundle["decisions"], actor="human", source="spec-review") > 0
+        and "spec-review" in verified_sources
+    )
+    human_plan_reviewed = (
+        accepted_decision_count(bundle["decisions"], actor="human", source="plan-review") > 0
+        and "plan-review" in verified_sources
+    )
 
     if spec_status == "draft" and not spec_self_reviewed:
-        if all(section in bundle["spec"] for section in SPEC_REVIEW_READY_SECTIONS) and SPEC_TEMPLATE_MARKER not in bundle["spec"]:
+        spec_ready_for_review = (
+            all(section in bundle["spec"] for section in SPEC_REVIEW_READY_SECTIONS)
+            and SPEC_TEMPLATE_MARKER not in bundle["spec"]
+            and not has_template_only_lines(bundle["spec"])
+        )
+        if spec_ready_for_review:
             return {
                 "status": "needs_spec_self_review",
-                "next_actor": "planner",
+                "next_actor": "logos",
                 "planning_mode": "logos-spec-reviewer",
                 "human_allowed": False,
                 "read": ["docs/intent.md", "docs/decisions.md", "docs/spec.md"],
@@ -111,7 +143,7 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
             }
         return {
             "status": "needs_spec_authoring",
-            "next_actor": "planner",
+            "next_actor": "logos",
             "planning_mode": "logos-spec-writer",
             "human_allowed": False,
             "read": ["docs/intent.md", "docs/decisions.md", "docs/open-questions.md"],
@@ -119,12 +151,21 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
             "reason": "human-approved intent exists; Logos must write draft spec",
         }
 
-    if spec_status == "self-reviewed" and spec_self_reviewed and not human_spec_reviewed:
+    if spec_self_reviewed and not human_spec_reviewed and spec_status in {"self-reviewed", "approved"}:
         return {
             "status": "human_spec_review",
             "human_allowed": True,
             "review": "Review docs/spec.md and record accepted human decision with Source: spec-review before planning.",
             "source": "docs/spec.md",
+            "max_questions": 1,
+        }
+
+    if spec_status == "approved" and human_spec_reviewed and plan_status == "approved" and not human_plan_reviewed:
+        return {
+            "status": "human_plan_review",
+            "human_allowed": True,
+            "review": "Review docs/plan.md and record accepted human decision with Source: plan-review before execution.",
+            "source": "docs/plan.md",
             "max_questions": 1,
         }
 
@@ -139,7 +180,7 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
             }
         return {
             "status": "needs_plan_authoring",
-            "next_actor": "planner",
+            "next_actor": "logos",
             "planning_mode": "logos-plan-writer",
             "human_allowed": False,
             "read": ["docs/spec.md", "docs/decisions.md", "docs/plan.md"],
@@ -149,7 +190,7 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
 
     return {
         "status": "needs_internal_round",
-        "next_actor": "planner",
+        "next_actor": "logos",
         "human_allowed": False,
         "read": ["docs/intent.md", "docs/decisions.md", "docs/spec.md"],
         "write_any_of": ["docs/decisions.md", "docs/spec.md", "docs/plan.md"],

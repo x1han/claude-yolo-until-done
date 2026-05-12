@@ -6,13 +6,13 @@ import json
 import sys
 from pathlib import Path
 
-from agent_sessions import PLANNING_ROLE_NAMES, PLANNING_ROUND_STATUSES, agent_summary_path, append_planning_round, load_planning_rounds, resolve_role_session, tail_text
+from agent_sessions import PLANNING_ROLE_NAMES, PLANNING_ROUND_STATUSES, RUNTIME_ACTION_RESUME_BY_AGENT_ID, agent_summary_path, append_planning_round, load_planning_rounds, resolve_role_session, tail_text
 from grill_storm import status_payload
 
-ROLE_DISPLAY = {"interviewer": "Muse (right-brain divergent intent explorer)", "planner": "Logos (left-brain logical spec/plan architect)"}
+ROLE_DISPLAY = {"muse": "Muse (right-brain divergent intent explorer)", "logos": "Logos (left-brain logical spec/plan architect)"}
 
 REQUIRED_OUTPUT_SCHEMA = {
-    "role": "interviewer|planner",
+    "role": "|".join(PLANNING_ROLE_NAMES),
     "round": "integer >= 1",
     "status": "completed|blocked|failed",
     "docs_touched": ["docs/decisions.md"],
@@ -32,6 +32,19 @@ def build_agent_prompt(dispatch: dict) -> str:
         f"You are the {display} agent in a grill-storm planning loop.",
         f"Round {dispatch['round']}.",
     ]
+    agent_runtime = dispatch.get("agent_runtime") if isinstance(dispatch.get("agent_runtime"), dict) else {}
+    if agent_runtime:
+        lines.extend([
+            "",
+            "## Agent session routing",
+            f"- session_action: {dispatch.get('session_action', '')}",
+            f"- agent_id: {dispatch.get('agent_id', '')}",
+            f"- agent_generation: {dispatch.get('agent_generation', '')}",
+        ])
+        if agent_runtime.get("action") == RUNTIME_ACTION_RESUME_BY_AGENT_ID:
+            lines.append(f"- Runtime must resume/send to exactly this existing agent_id. Do not create a fresh {role} agent unless explicit replacement has been requested.")
+        else:
+            lines.append(f"- Runtime may create this {role} agent for the recorded generation. Later dispatches must reuse the recorded agent_id.")
     if dispatch.get("planning_mode"):
         lines.append(f"Planning mode: {dispatch['planning_mode']}.")
     lines.extend([
@@ -68,7 +81,12 @@ def next_round_number(run_root: Path | None) -> int:
 
 
 def peer_role(role: str) -> str:
-    return "planner" if role == "interviewer" else "interviewer"
+    if role not in PLANNING_ROLE_NAMES:
+        raise ValueError(f"Unsupported planning role agent: {role}")
+    peers = [candidate for candidate in PLANNING_ROLE_NAMES if candidate != role]
+    if len(peers) != 1:
+        raise ValueError("Planning peer routing requires exactly two planning roles")
+    return peers[0]
 
 
 def read_peer_summary(run_root: Path | None, role: str) -> str:
@@ -106,6 +124,7 @@ def build_dispatch_request(project_dir: Path, status: dict, *, run_root: Path | 
         request["session_action"] = session["action"]
         request["agent_id"] = session["agent_id"]
         request["agent_generation"] = session["generation"]
+        request["agent_runtime"] = session["runtime"]
     request["agent_prompt"] = build_agent_prompt(request)
     return request
 

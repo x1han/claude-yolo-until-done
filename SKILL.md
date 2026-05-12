@@ -9,7 +9,7 @@ This is Claude Code only workflow for grill-storm planning and high-autonomy fix
 
 Core rule: first converge on approved spec and implementation plan through local docs, then execute approved plan through lightweight runtime.
 
-Normal usage is simple: initialize local grill-storm bundle, let `Interviewer` and `Planner` converge on docs, then use `claude-yolo-until-done` to execute approved plan.
+Normal usage is simple: initialize local grill-storm bundle, let `Muse` and `Logos` converge on docs, then use `claude-yolo-until-done` to execute approved plan.
 
 This skill is fail-closed workflow, not general coding prompt. If runtime, planning docs, inputs, or hooks are incomplete, it must stop instead of improvising.
 
@@ -27,16 +27,16 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 - preflight owns startup classification. If approved plan and spec exist but run root does not yet exist, preflight should bootstrap new run with `workflow/bootstrap.py` instead of failing just because `.yolo/` is absent.
 - Only continue-run path should fail closed for missing durable state. Once run root already exists, missing or incomplete `state.json` or `trace.md` must block continuation.
 - Planning mode should use shared docs as primary context, not chat history.
-- Planning mode should use `Interviewer` and `Planner` in turn loop, with one key question at time and ask-late behavior.
+- Planning mode should use `Muse` and `Logos` in turn loop, with one key question at time and ask-late behavior.
 - This skill may consume plan, continue run, repair failures, verify progress, update durable state, and advance worker/watcher transitions.
 - This skill may not replace planning with hidden assumptions, rewrite scope silently, or weaken verification because current session is tired, compressed, or blocked.
 
 ## Startup Contract
 - Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
 - Planning loop command: use `workflow/grill_storm_loop.py next --project-dir <output-folder> --run-root <output-folder>/.yolo` to get either a terminal planning status or a structured `dispatch_required` payload.
-- When `dispatch_required` is returned, call the Claude Code `Agent` tool for the requested `Interviewer` or `Planner`, then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
-- `Interviewer` and `Planner` communicate through the docs mailbox and role summaries, not hidden chat-only state.
-- Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and return `human_dialogue` for consensus or joint uncertainty.
+- When `dispatch_required` is returned, follow its role session routing: `session_action: create` creates the requested `Muse` or `Logos` agent once; `session_action: reuse` must resume/send to exactly the provided `agent_id` and must not create a fresh role agent. Then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
+- `Muse` and `Logos` communicate through the docs mailbox and role summaries, not hidden chat-only state.
+- Planning loop: `Muse` and `Logos` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and return `human_dialogue` for consensus or joint uncertainty.
 - human-approved spec and human-approved plan are required: record `Source: spec-review` before plan authoring and `Source: plan-review` before execution.
 - New run default: approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, pass `workflow/validate_grill_docs.py`, and `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
 - New run override: both `--spec` and `--plan` point to existing approved planning artifacts outside the default grill-storm docs.
@@ -100,6 +100,8 @@ Default mode is acyclic. Loop mode is selected only at preflight/bootstrap with 
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 
 Role agent sessions are per `.yolo/` run. Reuse the same role agent for later dispatches to that role when possible.
+
+Each role dispatch carries `agent_id` routing metadata. `create` means create the role agent once for that generation. `reuse` means resume/send to exactly that stored `agent_id`; do not create a fresh role agent with new context. Replacement is explicit only and creates a new generation through replacement flow.
 
 `agent_sessions.json` stores role-agent routing metadata. It is not workflow authority. `state.json` remains authoritative.
 

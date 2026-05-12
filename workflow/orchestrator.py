@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from agent_sessions import resolve_role_session
+from agent_sessions import dispatch_runtime_contract, resolve_role_session
 from state import append_trace_event, build_resume_target, state_path, transition_state, utc_now, write_state
 
 
@@ -276,7 +276,20 @@ def replay_dispatch_record(state: dict, dispatched_at: str) -> dict | None:
 
 
 def ensure_dispatch_agent_session(dispatch: dict, run_root: Path | None, dispatched_at: str) -> dict:
-    if run_root is None or dispatch.get("role") == "human" or dispatch.get("agent_session"):
+    if run_root is None or dispatch.get("role") == "human":
+        return dispatch
+    agent_session = dispatch.get("agent_session")
+    if isinstance(agent_session, dict) and agent_session:
+        if "runtime" in agent_session:
+            return dispatch
+        action = str(agent_session.get("action", ""))
+        agent_id = str(agent_session.get("agent_id", ""))
+        if action and agent_id:
+            enriched = dict(dispatch)
+            normalized_session = dict(agent_session)
+            normalized_session["runtime"] = dispatch_runtime_contract(action, agent_id)
+            enriched["agent_session"] = normalized_session
+            return enriched
         return dispatch
     enriched = dict(dispatch)
     enriched["agent_session"] = resolve_role_session(run_root, dispatch["role"], dispatch.get("dispatch_owner", ""), now=dispatched_at)
@@ -457,10 +470,11 @@ def consume_dispatch(state: dict, consumer_id: str, run_root: Path | None = None
 
             dispatch = dict(state.get("last_dispatch", {}))
             if dispatch:
-                missing_agent_session = not bool(dispatch.get("agent_session"))
+                original_agent_session = dispatch.get("agent_session")
                 dispatch = ensure_dispatch_agent_session(dispatch, run_root, claim.get("claimed_at") or timestamp)
+                agent_session_changed = dispatch.get("agent_session") != original_agent_session
                 state["last_dispatch"] = dispatch
-                return {"result": "dispatched", **dispatch, "replayed": True}, missing_agent_session, trace_required
+                return {"result": "dispatched", **dispatch, "replayed": True}, agent_session_changed, trace_required
             if dispatch_requires_intent(state):
                 transition_dispatch_terminal(state, ABANDONED_STATUS, timestamp, "live claim is missing dispatch_intent")
                 return {
@@ -470,6 +484,7 @@ def consume_dispatch(state: dict, consumer_id: str, run_root: Path | None = None
                 }, True, False
 
             dispatch = build_dispatch_record(state, run_root=run_root, dispatched_at=claim.get("claimed_at") or timestamp)
+            dispatch = ensure_dispatch_agent_session(dispatch, run_root, claim.get("claimed_at") or timestamp)
             state["dispatch_status"] = RUNNING_STATUS
             state["last_dispatch"] = dispatch
             return {"result": "dispatched", **dispatch, "replayed": True}, True, True
@@ -509,7 +524,12 @@ def orchestrate(run_root: Path, state: dict, consumer_id: str | None = None) -> 
             if not preview_mutated:
                 return preview_result
         elif preview_result.get("replayed") is True and not preview_mutated:
-            return preview_result
+            preview_session = preview_result.get("agent_session")
+            if not (
+                not preview_session
+                or (isinstance(preview_session, dict) and "runtime" not in preview_session)
+            ):
+                return preview_result
 
         outcome: dict[str, object] = {}
 

@@ -8,6 +8,8 @@
 
 `agent_sessions.json` is per `.yolo/` run and stores role-agent routing metadata only.
 
+Role dispatch metadata includes `agent_id` and runtime routing. `create` creates the role agent once for that generation. `reuse` must resume/send to exactly the stored `agent_id`; it must not create a fresh role agent. Replacement is explicit only and creates a new generation.
+
 Each role lab notebook lives under `agents/<role>-log.md`. It preserves concise operational context for later continuation or explicit replacement.
 
 These files do not override `state.json`. If they are missing, runtime may recreate them. If malformed, runtime fails closed or repairs without mutating workflow state.

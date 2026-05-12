@@ -15,7 +15,7 @@ Before execution starts, authoring flow must have already produced:
 Current first-party grill-storm path should:
 
 - use local Markdown files as primary state
-- use Muse/`Interviewer` and Logos/`Planner` in turn loop; status routing is not itself agent launch
+- use `muse` and `logos` in turn loop; status routing is not itself agent launch
 - let Muse infer intent from sparse user wording and propose 1-3 adjacent divergent expansions before Logos evaluates feasibility
 - combine internal grilling with brainstorming-style alternatives, tradeoffs, recommendation, and spec self-review before asking user
 - prefer internal verification before asking user
@@ -27,7 +27,7 @@ Current first-party grill-storm path should:
 
 ## Two-agent planning loop
 
-`workflow/grill_storm.py --status` is status-only. `workflow/grill_storm_loop.py` owns planning-loop advancement and emits dispatch requests. Main Claude Code runtime must satisfy those requests by launching the matching Muse/`Interviewer` or Logos/`Planner` Agent and recording the structured result.
+`workflow/grill_storm.py --status` is status-only. `workflow/grill_storm_loop.py` owns planning-loop advancement and emits dispatch requests. Main Claude Code runtime must satisfy those requests by launching the matching `muse` or `logos` Agent and recording the structured result.
 
 The agents communicate through the docs mailbox: intent, open questions, decisions, spec, plan, and role summaries. A planning conclusion is not durable until it is written there.
 

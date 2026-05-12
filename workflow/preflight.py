@@ -145,7 +145,15 @@ def grill_storm_status_text(project_dir: Path) -> str:
         text=True,
         check=False,
     )
-    return (result.stdout or result.stderr).strip()
+    text = (result.stdout or result.stderr).strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    status = payload.get("status")
+    if status in {"human_dialogue", "human_spec_review", "human_plan_review"}:
+        return text + "\nmain session must ask the human and record approval with workflow/human_approvals.py before execution."
+    return text
 
 
 
@@ -366,8 +374,8 @@ def main() -> int:
         "owner": state.get("owner"),
         "next_action": state.get("next_action"),
         "runtime_entrypoint": runtime["entrypoint"],
-            "skip_permissions_verified": runtime["skip_permissions_verified"],
-            "runtime_warnings": runtime["warnings"],
+        "skip_permissions_verified": runtime["skip_permissions_verified"],
+        "runtime_warnings": runtime["warnings"],
         "dispatch_recovery": dispatch_recovery,
     }
     print(json.dumps(payload, ensure_ascii=True))

@@ -657,6 +657,8 @@ class OrchestratorRoutingTest(unittest.TestCase):
             self.assertEqual(result["agent_session"]["role"], "worker")
             self.assertEqual(result["agent_session"]["action"], "create")
             self.assertEqual(result["agent_session"]["generation"], 1)
+            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
+            self.assertEqual(result["agent_session"]["runtime"]["agent_id"], result["agent_session"]["agent_id"])
             registry = load_agent_sessions(run_root)
             self.assertEqual(registry["roles"]["worker"]["agent_id"], result["agent_session"]["agent_id"])
 
@@ -702,6 +704,9 @@ class OrchestratorRoutingTest(unittest.TestCase):
 
             self.assertEqual(second["agent_session"]["action"], "reuse")
             self.assertEqual(second["agent_session"]["agent_id"], first["agent_session"]["agent_id"])
+            self.assertEqual(second["agent_session"]["runtime"]["action"], "resume_by_agent_id")
+            self.assertEqual(second["agent_session"]["runtime"]["agent_id"], first["agent_session"]["agent_id"])
+            self.assertTrue(second["agent_session"]["runtime"]["must_resume_exact_agent_id"])
 
     def test_orchestrate_enriches_legacy_replayed_dispatch_with_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -748,7 +753,100 @@ class OrchestratorRoutingTest(unittest.TestCase):
             persisted = load_state(run_root)
 
             self.assertEqual(result["agent_session"]["action"], "create")
+            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
             self.assertEqual(persisted["last_dispatch"]["agent_session"]["agent_id"], result["agent_session"]["agent_id"])
+
+    def test_orchestrate_enriches_rebuilt_live_claim_dispatch_with_agent_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            state = {
+                "state_version": 1,
+                "task_id": "task-001",
+                "task_title": "Persist agent sessions",
+                "task_goal": "Keep worker context.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "worker",
+                "dispatch_status": "running",
+                "dispatch_intent": {"role": "worker", "action": "worker_update"},
+                "dispatch_claim": {
+                    "owner": "worker:gate-task-001:1",
+                    "claimed_at": "2026-05-11T00:00:00+00:00",
+                    "lease_expires_at": "2999-01-01T00:00:00+00:00",
+                },
+                "last_dispatch": {},
+                "worker_request": "",
+                "worker_question": "",
+                "human_handoff": {},
+                "blocked_for_human": False,
+                "status": "active",
+                "owner": "worker",
+                "supervision": {"last_token_io_at": "2026-05-11T00:00:00+00:00", "last_progress_at": "", "stall_timeout_seconds": 600, "retry_limit": 3, "retry_count": 0},
+            }
+            write_state(run_root, state)
+
+            result = orchestrate(run_root, state, consumer_id="worker:gate-task-001:1")
+            persisted = load_state(run_root)
+
+            self.assertEqual(result["result"], "dispatched")
+            self.assertTrue(result["replayed"])
+            self.assertEqual(result["agent_session"]["role"], "worker")
+            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["runtime"]["agent_id"], result["agent_session"]["agent_id"])
+
+    def test_orchestrate_normalizes_partial_replayed_agent_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            state = {
+                "state_version": 1,
+                "task_id": "task-001",
+                "task_title": "Persist agent sessions",
+                "task_goal": "Keep watcher context.",
+                "task_scope": [],
+                "task_inputs": {},
+                "task_handoff_notes": [],
+                "gate_id": "gate-task-001",
+                "gate_attempt": 0,
+                "gate_max_attempts": 5,
+                "requested_role": "watcher",
+                "next_action": "review",
+                "dispatch_status": "running",
+                "dispatch_intent": {"role": "watcher", "action": "review"},
+                "dispatch_claim": {
+                    "owner": "watcher:gate-task-001:1",
+                    "claimed_at": "2026-05-11T00:00:00+00:00",
+                    "lease_expires_at": "2999-01-01T00:00:00+00:00",
+                },
+                "last_dispatch": {
+                    "role": "watcher",
+                    "task_id": "task-001",
+                    "gate_id": "gate-task-001",
+                    "dispatch_owner": "watcher:gate-task-001:1",
+                    "next_action": "review",
+                    "dispatched_at": "2026-05-11T00:00:00+00:00",
+                    "task_packet": {"role": "watcher"},
+                    "agent_session": {"role": "watcher", "action": "reuse", "agent_id": "watcher-1-existing", "generation": 1},
+                },
+                "worker_request": "",
+                "worker_question": "",
+                "human_handoff": {},
+                "blocked_for_human": False,
+                "status": "needs_review",
+                "owner": "watcher",
+                "supervision": {"last_token_io_at": "2026-05-11T00:00:00+00:00", "last_progress_at": "", "stall_timeout_seconds": 600, "retry_limit": 3, "retry_count": 0},
+            }
+            write_state(run_root, state)
+
+            result = orchestrate(run_root, state, consumer_id="watcher:gate-task-001:1")
+            persisted = load_state(run_root)
+
+            self.assertEqual(result["agent_session"]["runtime"]["action"], "resume_by_agent_id")
+            self.assertEqual(result["agent_session"]["runtime"]["agent_id"], "watcher-1-existing")
+            self.assertTrue(persisted["last_dispatch"]["agent_session"]["runtime"]["must_resume_exact_agent_id"])
 
     def test_orchestrate_noops_after_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

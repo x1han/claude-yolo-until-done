@@ -161,7 +161,7 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             registry_path = run_root / "agent_sessions.json"
             self.assertTrue(registry_path.exists())
             registry = json.loads(registry_path.read_text(encoding="utf-8"))
-            self.assertEqual(set(registry["roles"]), {"worker", "watcher", "helper", "interviewer", "planner"})
+            self.assertEqual(set(registry["roles"]), {"worker", "watcher", "helper", "muse", "logos"})
             for role in registry["roles"]:
                 self.assertTrue((run_root / "agents" / f"{role}-log.md").exists())
                 self.assertTrue((run_root / "agents" / f"{role}-summary.md").exists())

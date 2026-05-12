@@ -24,7 +24,7 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "checklist",
                 "verification evidence",
             ],
-            ".claude/agents/interviewer.md": [
+            ".claude/agents/muse.md": [
                 "Muse",
                 "right-brain",
                 "1-3 adjacent but divergent possibilities",
@@ -35,7 +35,7 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "joint uncertainty",
                 "Do not write final spec or plan.",
             ],
-            ".claude/agents/planner.md": [
+            ".claude/agents/logos.md": [
                 "Logos",
                 "left-brain",
                 "logical spec/plan architect",
@@ -124,6 +124,11 @@ class DocsAndTemplatesTest(unittest.TestCase):
             self.assertIn("agent_sessions.json", body)
             self.assertIn("role lab notebook", body)
             self.assertIn("per `.yolo/` run", body)
+            self.assertIn("agent_id", body)
+            self.assertIn("resume/send to exactly", body)
+            self.assertIn("fresh role agent", body)
+            self.assertIn("Replacement is explicit only", body)
+        self.assertIn("resume_by_agent_id", readme)
 
     def test_docs_describe_grill_first_then_yolo_usage(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
@@ -135,8 +140,8 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertIn("output folder", readme)
         self.assertIn("defaults to current working directory", readme)
         self.assertIn("`.yolo/` lives inside output folder and is default run-root model", readme)
-        self.assertIn("Interviewer", skill)
-        self.assertIn("Planner", skill)
+        self.assertIn("Muse", skill)
+        self.assertIn("Logos", skill)
         self.assertIn("run root does not yet exist", skill)
         self.assertIn("bootstrap.py", skill)
         self.assertIn("Only continue-run path should fail closed for missing durable state", skill)
@@ -204,12 +209,12 @@ class DocsAndTemplatesTest(unittest.TestCase):
         skill_path = SKILL_ROOT / ".claude" / "skills" / "grill-storm" / "SKILL.md"
         body = skill_path.read_text(encoding="utf-8")
         self.assertIn("name: grill-storm", body)
-        self.assertIn("Muse/Interviewer and Logos/Planner do most discussion before the user sees anything", body)
+        self.assertIn("Muse and Logos do most discussion before the user sees anything", body)
         self.assertIn("workflow/grill_storm.py", body)
         self.assertIn("workflow/validate_grill_docs.py", body)
         self.assertIn("Ask user only after both agents have recorded accepted internal rounds", body)
         self.assertIn("does not launch agents by itself", body)
-        self.assertIn("dispatch or continue Muse/Interviewer or Logos/Planner", body)
+        self.assertIn("dispatch or continue Muse or Logos", body)
         self.assertIn("1-3 adjacent divergent expansions", body)
         self.assertIn("2-3 approaches with tradeoffs and recommendation", body)
         self.assertIn("docs/intent.md", body)

@@ -9,8 +9,14 @@ from state import atomic_write_text, utc_now
 AGENT_SESSIONS_FILE_NAME = "agent_sessions.json"
 PLANNING_ROUNDS_FILE_NAME = "planning_rounds.json"
 AGENTS_DIR_NAME = "agents"
-ROLE_NAMES = ("worker", "watcher", "helper", "interviewer", "planner")
-PLANNING_ROLE_NAMES = ("interviewer", "planner")
+ROLE_NAMES = ("worker", "watcher", "helper", "muse", "logos")
+PLANNING_ROLE_NAMES = ("muse", "logos")
+SESSION_ACTION_CREATE = "create"
+SESSION_ACTION_REUSE = "reuse"
+SESSION_ACTION_REPLACE = "replace"
+RUNTIME_ACTION_CREATE = "create"
+RUNTIME_ACTION_RESUME_BY_AGENT_ID = "resume_by_agent_id"
+SESSION_ACTIONS = {SESSION_ACTION_CREATE, SESSION_ACTION_REUSE, SESSION_ACTION_REPLACE}
 SESSION_STATUSES = {"", "active", "replaced", "failed"}
 PLANNING_ROUND_STATUSES = {"completed", "blocked", "failed"}
 
@@ -218,6 +224,19 @@ def new_agent_id(role: str, generation: int) -> str:
     return f"{role}-{generation}-{uuid4().hex}"
 
 
+def dispatch_runtime_contract(action: str, agent_id: str) -> dict:
+    if action not in SESSION_ACTIONS:
+        raise ValueError(f"Unsupported agent session action: {action}")
+    return {
+        "tool": "Agent",
+        "action": RUNTIME_ACTION_RESUME_BY_AGENT_ID if action == SESSION_ACTION_REUSE else RUNTIME_ACTION_CREATE,
+        "agent_id": agent_id,
+        "must_resume_exact_agent_id": action == SESSION_ACTION_REUSE,
+        "replacement_allowed": False,
+        "replacement_instruction": "Only replace this role agent through explicit replacement flow after the stored agent is unavailable.",
+    }
+
+
 def resolve_role_session(run_root: Path, role: str, dispatch_owner: str, now: str | None = None) -> dict:
     require_role(role)
     observed_at = now or timestamp()
@@ -225,14 +244,14 @@ def resolve_role_session(run_root: Path, role: str, dispatch_owner: str, now: st
     ensure_agent_logs(run_root)
     session = payload["roles"][role]
     if session.get("status") == "active" and session.get("agent_id"):
-        action = "reuse"
+        action = SESSION_ACTION_REUSE
     else:
         session["generation"] = int(session.get("generation", 0)) + 1
         session["agent_id"] = new_agent_id(role, session["generation"])
         session["status"] = "active"
         session["created_at"] = observed_at
         session["replacement_reason"] = ""
-        action = "create"
+        action = SESSION_ACTION_CREATE
     session["last_seen_at"] = observed_at
     session["last_dispatch_owner"] = dispatch_owner
     write_agent_sessions(run_root, payload)
@@ -246,7 +265,7 @@ def resolve_role_session(run_root: Path, role: str, dispatch_owner: str, now: st
         next_steps=["Continue assigned role work."],
         now=observed_at,
     )
-    return {"role": role, "action": action, **session}
+    return {"role": role, "action": action, **session, "runtime": dispatch_runtime_contract(action, session["agent_id"])}
 
 
 def replace_role_session(run_root: Path, role: str, dispatch_owner: str, reason: str, now: str | None = None) -> dict:
@@ -278,7 +297,7 @@ def replace_role_session(run_root: Path, role: str, dispatch_owner: str, reason:
         next_steps=["Resume current dispatch from durable context."],
         now=observed_at,
     )
-    return {"role": role, "action": "replace", **replacement}
+    return {"role": role, "action": SESSION_ACTION_REPLACE, **replacement, "runtime": dispatch_runtime_contract(SESSION_ACTION_REPLACE, replacement["agent_id"])}
 
 
 def append_role_log_entry(

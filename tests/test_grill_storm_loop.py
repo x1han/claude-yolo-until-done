@@ -15,9 +15,14 @@ if str(WORKFLOW_DIR) not in sys.path:
 
 from agent_sessions import load_agent_sessions
 from grill_storm_loop import build_dispatch_request, run_planning_step
+from human_approvals import record_human_approval
 
 
 class GrillStormLoopTest(unittest.TestCase):
+    def write_human_approvals(self, project_dir: Path, *sources: str) -> None:
+        for source in sources:
+            record_human_approval(project_dir, source, f"prompt {source}", f"approved {source}")
+
     def write_docs(self, project_dir: Path, *, docs_dir: str = "docs", decisions: str = "# Decisions\n\n## Decision Log\n") -> None:
         docs = project_dir / docs_dir
         docs.mkdir(parents=True, exist_ok=True)
@@ -27,7 +32,7 @@ class GrillStormLoopTest(unittest.TestCase):
         (docs / "spec.md").write_text("# Spec\n\nStatus: draft\n\n## Acceptance Criteria\n- [ ] Docs converge.\n", encoding="utf-8")
         (docs / "plan.md").write_text("# Plan\n\nStatus: draft\n\n## Steps\n1. Step: converge docs.\n   Verify: validator passes.\n", encoding="utf-8")
 
-    def test_planning_step_requests_interviewer_first(self) -> None:
+    def test_planning_step_requests_muse_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             self.write_docs(project_dir)
@@ -36,7 +41,7 @@ class GrillStormLoopTest(unittest.TestCase):
 
             self.assertEqual(payload["status"], "dispatch_required")
             dispatch = payload["dispatch_request"]
-            self.assertEqual(dispatch["role"], "interviewer")
+            self.assertEqual(dispatch["role"], "muse")
             self.assertEqual(dispatch["round"], 1)
             self.assertEqual(dispatch["project_dir"], str(project_dir.resolve()))
             self.assertEqual(dispatch["run_root"], str((project_dir / ".yolo").resolve()))
@@ -46,8 +51,10 @@ class GrillStormLoopTest(unittest.TestCase):
             self.assertIn("agent_prompt", dispatch)
             self.assertIn("Muse", dispatch["agent_prompt"])
             self.assertEqual(dispatch["session_action"], "create")
-            self.assertTrue(dispatch["agent_id"].startswith("interviewer-1-"))
+            self.assertTrue(dispatch["agent_id"].startswith("muse-1-"))
             self.assertEqual(dispatch["agent_generation"], 1)
+            self.assertEqual(dispatch["agent_runtime"]["action"], "create")
+            self.assertEqual(dispatch["agent_runtime"]["agent_id"], dispatch["agent_id"])
 
     def test_persistent_session_reused_across_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -63,7 +70,7 @@ class GrillStormLoopTest(unittest.TestCase):
             record_round_result(
                 dispatch1,
                 {
-                    "role": "interviewer",
+                    "role": "muse",
                     "round": 1,
                     "status": "completed",
                     "docs_touched": ["docs/decisions.md"],
@@ -74,20 +81,50 @@ class GrillStormLoopTest(unittest.TestCase):
                 },
             )
 
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: User wants safe planning.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: User wants safe planning.\n"
             self.write_docs(project_dir, decisions=decisions)
 
             dispatch2 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
-            self.assertEqual(dispatch2["role"], "planner")
+            self.assertEqual(dispatch2["role"], "logos")
             self.assertEqual(dispatch2["session_action"], "create")
             self.assertIn("Logos", dispatch2["agent_prompt"])
 
             sessions = load_agent_sessions(run_root)
-            self.assertEqual(sessions["roles"]["interviewer"]["agent_id"], agent_id_1)
-            self.assertEqual(sessions["roles"]["interviewer"]["generation"], 1)
-            self.assertEqual(sessions["roles"]["interviewer"]["status"], "active")
-            self.assertEqual(sessions["roles"]["planner"]["generation"], 1)
-            self.assertEqual(sessions["roles"]["planner"]["status"], "active")
+            self.assertEqual(sessions["roles"]["muse"]["agent_id"], agent_id_1)
+            self.assertEqual(sessions["roles"]["muse"]["generation"], 1)
+            self.assertEqual(sessions["roles"]["muse"]["status"], "active")
+            self.assertEqual(sessions["roles"]["logos"]["generation"], 1)
+            self.assertEqual(sessions["roles"]["logos"]["status"], "active")
+
+    def test_planning_dispatch_reuse_instructs_exact_agent_id_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(project_dir)
+            run_root = project_dir / ".yolo"
+            first = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
+            agent_id = first["agent_id"]
+
+            dispatch = build_dispatch_request(
+                project_dir,
+                {
+                    "status": "needs_internal_round",
+                    "next_actor": "muse",
+                    "planning_mode": "internal_round",
+                    "read": ["docs/intent.md"],
+                    "write_any_of": ["docs/decisions.md"],
+                    "reason": "same role again",
+                },
+                run_root=run_root,
+                round_number=2,
+            )
+
+            self.assertEqual(dispatch["session_action"], "reuse")
+            self.assertEqual(dispatch["agent_id"], agent_id)
+            self.assertEqual(dispatch["agent_runtime"]["action"], "resume_by_agent_id")
+            self.assertEqual(dispatch["agent_runtime"]["agent_id"], agent_id)
+            self.assertTrue(dispatch["agent_runtime"]["must_resume_exact_agent_id"])
+            self.assertIn(agent_id, dispatch["agent_prompt"])
+            self.assertIn("Do not create a fresh muse agent", dispatch["agent_prompt"])
 
     def test_build_dispatch_request_rejects_unknown_actor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,14 +159,14 @@ class GrillStormLoopTest(unittest.TestCase):
                 record_round_result(
                     dispatch,
                     {
-                        "role": "interviewer",
+                        "role": "muse",
                         "round": 1,
                         "status": "completed",
                         "docs_touched": ["docs/plan.md"],
                         "summary": "Tried to edit plan.",
                         "decisions_recorded": [],
                         "questions_added": [],
-                        "next_recommendation": "Planner should continue.",
+                        "next_recommendation": "Logos should continue.",
                     },
                 )
 
@@ -147,7 +184,7 @@ class GrillStormLoopTest(unittest.TestCase):
                 record_round_result(
                     dispatch,
                     {
-                        "role": "interviewer",
+                        "role": "muse",
                         "round": 1,
                         "status": "completed",
                         "docs_touched": [],
@@ -172,19 +209,19 @@ class GrillStormLoopTest(unittest.TestCase):
             persisted = record_round_result(
                 dispatch,
                 {
-                    "role": "interviewer",
+                    "role": "muse",
                     "round": 1,
                     "status": "completed",
                     "docs_touched": ["docs/decisions.md"],
                     "summary": "Recorded preflight ownership decision.",
                     "decisions_recorded": ["Preflight owns execution readiness."],
                     "questions_added": [],
-                    "next_recommendation": "Planner should compare options.",
+                    "next_recommendation": "Logos should compare options.",
                 },
                 now="2026-05-11T02:00:00+00:00",
             )
 
-            self.assertEqual(persisted["role"], "interviewer")
+            self.assertEqual(persisted["role"], "muse")
             rounds = load_planning_rounds(project_dir / ".yolo")
             self.assertEqual(rounds[0]["summary"], "Recorded preflight ownership decision.")
 
@@ -204,7 +241,7 @@ class GrillStormLoopTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "dispatch_required")
-            self.assertEqual(payload["dispatch_request"]["role"], "interviewer")
+            self.assertEqual(payload["dispatch_request"]["role"], "muse")
 
     def test_cli_record_accepts_round_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -221,14 +258,14 @@ class GrillStormLoopTest(unittest.TestCase):
             result_payload = {
                 "dispatch_request": dispatch,
                 "round_result": {
-                    "role": "interviewer",
+                    "role": "muse",
                     "round": 1,
                     "status": "completed",
                     "docs_touched": ["docs/decisions.md"],
                     "summary": "Recorded decision.",
                     "decisions_recorded": ["Preflight owns readiness."],
                     "questions_added": [],
-                    "next_recommendation": "Planner continue.",
+                    "next_recommendation": "Logos continue.",
                 },
             }
 
@@ -255,7 +292,7 @@ class GrillStormLoopTest(unittest.TestCase):
             record_round_result(
                 dispatch,
                 {
-                    "role": "interviewer",
+                    "role": "muse",
                     "round": 1,
                     "status": "completed",
                     "docs_touched": ["docs/decisions.md"],
@@ -274,7 +311,7 @@ class GrillStormLoopTest(unittest.TestCase):
     def test_step_passes_through_ask_user_after_two_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Ask late.\n\n### 2026-05-11 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
             self.write_docs(project_dir, decisions=decisions)
             (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Which owner approves execution? | Recommended: preflight\n", encoding="utf-8")
 
@@ -286,8 +323,9 @@ class GrillStormLoopTest(unittest.TestCase):
     def test_step_passes_through_ready_for_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Ask late.\n\n### 2026-05-11 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
             self.write_docs(project_dir, decisions=decisions)
+            self.write_human_approvals(project_dir, "consensus", "spec-review", "plan-review")
             (project_dir / "docs" / "spec.md").write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- [x] Docs converge.\n", encoding="utf-8")
             (project_dir / "docs" / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Files: workflow/grill_storm.py\n   Run: python -m unittest tests.test_grill_storm_loop -v\n   Expected: PASS\n   Verify: tests pass.\n\n## Rollback / Safety\n- Revert loop dispatch.\n", encoding="utf-8")
 
@@ -297,18 +335,19 @@ class GrillStormLoopTest(unittest.TestCase):
             self.assertIn("spec", payload)
             self.assertIn("plan", payload)
 
-    def test_loop_dispatches_planner_spec_authoring_mode(self) -> None:
+    def test_loop_dispatches_logos_spec_authoring_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n"
             self.write_docs(project_dir, decisions=decisions)
+            self.write_human_approvals(project_dir, "consensus")
             (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] None.\n", encoding="utf-8")
 
             payload = run_planning_step(project_dir, run_root=project_dir / ".yolo")
 
             self.assertEqual(payload["status"], "dispatch_required")
             dispatch = payload["dispatch_request"]
-            self.assertEqual(dispatch["role"], "planner")
+            self.assertEqual(dispatch["role"], "logos")
             self.assertEqual(dispatch["planning_mode"], "logos-spec-writer")
             self.assertIn("logos-spec-writer", dispatch["agent_prompt"])
             self.assertIn("docs/spec.md", dispatch["write_any_of"])
@@ -316,7 +355,7 @@ class GrillStormLoopTest(unittest.TestCase):
     def test_loop_passes_through_human_dialogue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored options.\n\n### 2026-05-12 - Planner consensus\n- Status: accepted\n- Actor: planner\n- Source: consensus-candidate\n- Decision: Surface one approach.\n- Consensus: Controller gates | Summary: add state gates | Tradeoffs: clear ownership | Recommended: true\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored options.\n\n### 2026-05-12 - Logos consensus\n- Status: accepted\n- Actor: logos\n- Source: consensus-candidate\n- Decision: Surface one approach.\n- Consensus: Controller gates | Summary: add state gates | Tradeoffs: clear ownership | Recommended: true\n"
             self.write_docs(project_dir, decisions=decisions)
             (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] None.\n", encoding="utf-8")
 

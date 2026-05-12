@@ -9,7 +9,7 @@ from state import build_current_task_view
 _TASK_HEADING_PATTERN = re.compile(r"^###\s+Task\s+\d+\s*:\s+(.*\S)\s*$")
 _TASK_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
 _TASK_SECTION_PATTERN = re.compile(
-    r"^#{1,6}\s+(?:Tasks?|Task\s+List|Implementation\s+Steps|Work\s+Items)\s*$",
+    r"^#{1,6}\s+(?:Tasks?|Task\s+List|Implementation\s+Steps|Steps|Work\s+Items)\s*$",
     re.IGNORECASE,
 )
 
