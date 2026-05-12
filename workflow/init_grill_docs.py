@@ -62,7 +62,14 @@ def build_decisions_template() -> str:
         "- Reason:\n"
         "- Alternatives considered:\n"
         "- Impact:\n"
-        "- Revisit when:\n"
+        "- Revisit when:\n\n"
+        "## Source Guide\n"
+        "Use these source values in real decision blocks when applicable; keep examples draft until accepted.\n"
+        "- Source: consensus\n"
+        "- Source: uncertainty\n"
+        "- Source: spec-self-review\n"
+        "- Source: spec-review\n"
+        "- Source: plan-review\n"
     )
 
 

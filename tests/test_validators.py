@@ -119,7 +119,7 @@ class ValidatorsTest(unittest.TestCase):
                         "next_action": "watcher_review",
                         "cleanup_required": False,
                         "requested_role": "watcher",
-                        "dispatch_status": "completed",
+                        "dispatch_status": "claimed",
                         "last_dispatch": {"role": "watcher", "task_id": "task-001"},
                         "certification": {
                             "submission": {

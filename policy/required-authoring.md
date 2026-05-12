@@ -19,7 +19,10 @@ Current first-party grill-storm path should:
 - let Muse infer intent from sparse user wording and propose 1-3 adjacent divergent expansions before Logos evaluates feasibility
 - combine internal grilling with brainstorming-style alternatives, tradeoffs, recommendation, and spec self-review before asking user
 - prefer internal verification before asking user
+- return `human_dialogue` when agents reach consensus or `joint_uncertainty`
 - ask user only when blocking, high-impact gap remains
+- require human-approved spec before plan authoring
+- require human-approved plan before execution
 - never write unconfirmed assumptions as final conclusions
 
 ## Two-agent planning loop

@@ -32,6 +32,9 @@ class GrillStormRuntimeTest(unittest.TestCase):
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
         return env
 
+    def human_gate_decisions(self) -> str:
+        return "\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
+
     def write_docs(
         self,
         project_dir: Path,
@@ -61,7 +64,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
             encoding="utf-8",
         )
         (docs_dir / "plan.md").write_text(
-            f"# Plan\n\nStatus: {plan_status}\n\n## Goal\n- Implement hard gate.\n\n## Steps\n1. Step: Add validator.\n   Verify: Run validator tests.\n2. Step: Wire preflight.\n   Verify: Preflight rejects drafts.\n3. Step: Document built-in skill.\n   Verify: Docs test passes.\n\n## Dependencies\n- Local docs.\n\n## File/Area Impact\n- workflow/preflight.py\n\n## Tests\n- python -m unittest tests.test_grill_storm_runtime -v\n\n## Rollback / Safety\n- Remove gate wiring.\n",
+            f"# Plan\n\nStatus: {plan_status}\n\n## Goal\n- Implement hard gate.\n\n## Steps\n1. Step: Add validator.\n   Files: workflow/validate_grill_docs.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Run validator tests.\n2. Step: Wire preflight.\n   Files: workflow/preflight.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Preflight rejects drafts.\n3. Step: Document built-in skill.\n   Files: .claude/skills/grill-storm/SKILL.md\n   Run: python -m unittest tests.test_docs_and_templates -v\n   Expected: PASS\n   Verify: Docs test passes.\n\n## Dependencies\n- Local docs.\n\n## File/Area Impact\n- workflow/preflight.py\n\n## Tests\n- python -m unittest tests.test_grill_storm_runtime -v\n\n## Rollback / Safety\n- Remove gate wiring.\n",
             encoding="utf-8",
         )
         return docs_dir
@@ -94,7 +97,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
             project_dir = Path(tmp)
             self.write_docs(
                 project_dir,
-                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n- Reason: Execution must fail closed.\n- Alternatives considered: docs only.\n- Impact: adds validator.\n- Revisit when: validator too strict.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate from controller.\n- Reason: Planning gate owns authoring readiness.\n- Alternatives considered: controller-only check.\n- Impact: clearer ownership.\n- Revisit when: preflight grows too large.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n- Reason: Execution must fail closed.\n- Alternatives considered: docs only.\n- Impact: adds validator.\n- Revisit when: validator too strict.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate from controller.\n- Reason: Planning gate owns authoring readiness.\n- Alternatives considered: controller-only check.\n- Impact: clearer ownership.\n- Revisit when: preflight grows too large.\n" + self.human_gate_decisions(),
             )
 
             result = subprocess.run(
@@ -249,7 +252,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
                 spec_status="approved",
                 plan_status="approved",
                 open_questions="# Open Questions\n\n## High Priority\n- [x] Question: gate owner\n  Answer: preflight validator\n  Impact: fail closed before execution\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n\n## Answered Recently\n- [x] Question: initial scope\n  Answer: built-in grill-storm\n  Impact: no external superpowers dependency\n",
-                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n- Reason: Execution must fail closed.\n- Alternatives considered: docs only.\n- Impact: adds validator.\n- Revisit when: validator too strict.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate from controller.\n- Reason: Planning gate owns authoring readiness.\n- Alternatives considered: controller-only check.\n- Impact: clearer ownership.\n- Revisit when: preflight grows too large.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n- Reason: Execution must fail closed.\n- Alternatives considered: docs only.\n- Impact: adds validator.\n- Revisit when: validator too strict.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate from controller.\n- Reason: Planning gate owns authoring readiness.\n- Alternatives considered: controller-only check.\n- Impact: clearer ownership.\n- Revisit when: preflight grows too large.\n" + self.human_gate_decisions(),
             )
 
             result = subprocess.run(
@@ -274,10 +277,10 @@ class GrillStormRuntimeTest(unittest.TestCase):
                 spec_status="approved",
                 plan_status="approved",
                 open_questions="# Open Questions\n\n## High Priority\n- [x] Question: review scope\n  Answer: inspect supplied code changes\n  Impact: watcher must review current diff only\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n",
-                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Code review loop should use built-in grill-storm docs.\n\n### 2026-05-11 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Plan contains one repeatable review task with verification.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Code review loop should use built-in grill-storm docs.\n\n### 2026-05-11 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Plan contains one repeatable review task with verification.\n" + self.human_gate_decisions(),
             )
             (project_dir / "docs" / "plan.md").write_text(
-                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Code review iteration\nReview the current code changes.\n\nVerify: watcher records review evidence for this iteration.\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Code review iteration\nReview the current code changes.\nFiles: workflow/orchestrator.py\nRun: python -m unittest tests.test_controller_review_flow -v\nExpected: PASS\nVerify: watcher records review evidence for this iteration.\n\n## Rollback / Safety\n- Stop loop before next iteration.\n",
                 encoding="utf-8",
             )
 
@@ -471,6 +474,229 @@ class GrillStormRuntimeTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
+
+    def test_validate_grill_docs_requires_human_consensus_spec_and_plan_approvals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GRILL_DOCS_PATH), "--project-dir", str(project_dir)],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("decisions.md is missing accepted human consensus or uncertainty resolution", result.stderr)
+            self.assertIn("decisions.md is missing accepted Logos spec self-review", result.stderr)
+            self.assertIn("decisions.md is missing accepted human spec review", result.stderr)
+            self.assertIn("decisions.md is missing accepted human plan review", result.stderr)
+
+    def test_validate_grill_docs_accepts_human_gated_ready_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n- Impact: authorizes spec generation.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec has no placeholders, contradictions, scope leaks, or ambiguous acceptance criteria.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n",
+            )
+            (project_dir / "docs" / "plan.md").write_text(
+                "# Plan\n\nStatus: approved\n\n## Goal\n- Implement human-gated planning.\n\n## Steps\n### Task 1: Add parser\nFiles: workflow/validate_grill_docs.py\nRun: python -m unittest tests.test_grill_storm_runtime -v\nExpected: PASS\nVerify: validator accepts approved bundle.\n\n## Rollback / Safety\n- Revert parser change.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GRILL_DOCS_PATH), "--project-dir", str(project_dir)],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "ready_for_execution")
+
+    def test_grill_storm_returns_human_dialogue_for_consensus_before_spec_authoring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored options.\n\n### 2026-05-12 - Planner consensus\n- Status: accepted\n- Actor: planner\n- Source: consensus-candidate\n- Decision: Surface two viable approaches.\n- Consensus: Minimal controller gates | Summary: add state gates only | Tradeoffs: smaller change; less prompt guidance | Recommended: false\n- Consensus: Controller plus prompt modes | Summary: add state gates and Logos modes | Tradeoffs: larger change; clearer behavior | Recommended: true\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "human_dialogue")
+            self.assertEqual(payload["dialogue_type"], "consensus")
+            self.assertTrue(payload["human_allowed"])
+            self.assertEqual(len(payload["items"]), 2)
+            self.assertEqual(payload["items"][1]["title"], "Controller plus prompt modes")
+            self.assertTrue(payload["items"][1]["recommended"])
+
+    def test_grill_storm_returns_human_dialogue_for_joint_uncertainty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Should spec approval happen before plan authoring? | Recommended: yes, require human spec approval first\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse cannot infer approval order alone.\n\n### 2026-05-12 - Planner uncertainty\n- Status: accepted\n- Actor: planner\n- Source: joint-uncertainty\n- Decision: Both agents need human approval policy.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "human_dialogue")
+            self.assertEqual(payload["dialogue_type"], "joint_uncertainty")
+            self.assertEqual(payload["question"], "Should spec approval happen before plan authoring?")
+            self.assertEqual(payload["recommended_answer"], "yes, require human spec approval first")
+
+    def test_grill_storm_requests_spec_authoring_after_human_intent_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "needs_spec_authoring")
+            self.assertEqual(payload["next_actor"], "planner")
+            self.assertEqual(payload["planning_mode"], "logos-spec-writer")
+
+    def test_grill_storm_requests_spec_self_review_after_draft_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="draft",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n",
+            )
+            (project_dir / "docs" / "spec.md").write_text(
+                "# Spec\n\nStatus: draft\n\n## Problem\n- Need human gates.\n\n## Requirements\n- Must require approval.\n\n## Acceptance Criteria\n- [ ] Controller blocks plan before spec approval.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "needs_spec_self_review")
+            self.assertEqual(payload["planning_mode"], "logos-spec-reviewer")
+
+    def test_grill_storm_requests_human_spec_review_after_self_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="self-reviewed",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "human_spec_review")
+            self.assertTrue(payload["human_allowed"])
+            self.assertIn("docs/spec.md", payload["review"])
+
+    def test_grill_storm_requests_plan_authoring_after_human_spec_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "needs_plan_authoring")
+            self.assertEqual(payload["planning_mode"], "logos-plan-writer")
+
+    def test_grill_storm_requests_human_plan_review_after_draft_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="draft",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n",
+            )
+            (project_dir / "docs" / "plan.md").write_text(
+                "# Plan\n\nStatus: draft\n\n## Goal\n- Implement human-gated planning.\n\n## Steps\n### Task 1: Add gates\nFiles: workflow/grill_storm.py\nRun: python -m unittest tests.test_grill_storm_runtime -v\nExpected: PASS\nVerify: staged status works.\n\n## Rollback / Safety\n- Revert controller gates.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "human_plan_review")
+            self.assertTrue(payload["human_allowed"])
+            self.assertIn("docs/plan.md", payload["review"])
 
 
 if __name__ == "__main__":

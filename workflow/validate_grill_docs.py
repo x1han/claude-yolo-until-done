@@ -93,6 +93,41 @@ def internal_rounds(decisions: str) -> dict[str, int]:
     return rounds
 
 
+def accepted_decision_count(decisions: str, *, actor: str, source: str) -> int:
+    count = 0
+    for block in decision_blocks(decisions):
+        if field_value(block, "Status", bullet=True, normalize=True) != "accepted":
+            continue
+        if field_value(block, "Actor", bullet=True, normalize=True) != actor:
+            continue
+        if field_value(block, "Source", bullet=True, normalize=True) == source:
+            count += 1
+    return count
+
+
+def has_human_intent_approval(decisions: str) -> bool:
+    return accepted_decision_count(decisions, actor="human", source="consensus") > 0 or accepted_decision_count(decisions, actor="human", source="uncertainty") > 0
+
+
+def plan_quality_errors(plan: str) -> list[str]:
+    errors: list[str] = []
+    required_terms = {
+        "exact files": "Files:",
+        "exact commands": "Run:",
+        "expected outputs": "Expected:",
+        "verification steps": "Verify:",
+        "rollback/safety notes": "## Rollback / Safety",
+    }
+    for label, needle in required_terms.items():
+        if needle not in plan:
+            errors.append(f"plan.md is missing {label}")
+    forbidden = ("TBD", "TODO", "implement later")
+    for marker in forbidden:
+        if marker.lower() in plan.lower():
+            errors.append(f"plan.md contains forbidden placeholder marker: {marker}")
+    return errors
+
+
 def has_template_only_lines(body: str) -> bool:
     for line in body.splitlines():
         if line.rstrip() in TEMPLATE_EMPTY_MARKERS:
@@ -136,6 +171,37 @@ def blocking_questions(open_questions: str) -> list[dict[str, str]]:
     return questions
 
 
+def consensus_items(decisions: str, *, limit: int = 3) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for block in decision_blocks(decisions):
+        if field_value(block, "Status", bullet=True, normalize=True) != "accepted":
+            continue
+        if field_value(block, "Source", bullet=True, normalize=True) != "consensus-candidate":
+            continue
+        for line in block.splitlines():
+            raw = line.strip()
+            if not raw.startswith("- Consensus:"):
+                continue
+            title = field_value(raw, "Consensus", bullet=True)
+            summary = field_value(raw, "Summary")
+            tradeoffs = field_value(raw, "Tradeoffs")
+            recommended = field_value(raw, "Recommended", normalize=True) == "true"
+            if title:
+                items.append({
+                    "title": title,
+                    "summary": summary,
+                    "tradeoffs": [tradeoffs] if tradeoffs else [],
+                    "recommended": recommended,
+                })
+                if len(items) >= limit:
+                    return items
+    return items
+
+
+def has_joint_uncertainty(decisions: str) -> bool:
+    return accepted_decision_count(decisions, actor="planner", source="joint-uncertainty") > 0
+
+
 def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, object]:
     root, bundle = read_bundle(project_dir, docs_dir_arg)
     errors: list[str] = []
@@ -154,6 +220,14 @@ def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[
         errors.append("decisions.md is missing accepted interviewer internal round")
     if rounds["planner"] < 1:
         errors.append("decisions.md is missing accepted planner internal round")
+    if not has_human_intent_approval(bundle["decisions"]):
+        errors.append("decisions.md is missing accepted human consensus or uncertainty resolution")
+    if accepted_decision_count(bundle["decisions"], actor="planner", source="spec-self-review") < 1:
+        errors.append("decisions.md is missing accepted Logos spec self-review")
+    if accepted_decision_count(bundle["decisions"], actor="human", source="spec-review") < 1:
+        errors.append("decisions.md is missing accepted human spec review")
+    if accepted_decision_count(bundle["decisions"], actor="human", source="plan-review") < 1:
+        errors.append("decisions.md is missing accepted human plan review")
 
     blockers = blocking_questions(bundle["open_questions"])
     if blockers:
@@ -168,8 +242,7 @@ def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[
         errors.append("spec.md is missing acceptance criteria")
     if "## Steps" not in bundle["plan"]:
         errors.append("plan.md is missing implementation steps")
-    if "Verify:" not in bundle["plan"]:
-        errors.append("plan.md is missing verification steps")
+    errors.extend(plan_quality_errors(bundle["plan"]))
 
     return {
         "status": "ready_for_execution" if not errors else "blocked",

@@ -41,6 +41,8 @@ Use built-in grill-storm authoring flow:
 - `Interviewer` reads `intent.md` and `open-questions.md`
 - `Planner` reads `intent.md`, `decisions.md`, and `spec.md`
 - after each round, update intent, open questions, decisions, spec, or plan instead of relying on memory
+- return `human_dialogue` when agents reach consensus or `joint_uncertainty`
+- require human-approved spec before plan authoring and human-approved plan before execution
 
 Use `intent.md`, `open-questions.md`, and `decisions.md` as primary working state. `spec.md` should hold stable requirements only. `plan.md` should become execution-ready only after spec is stable.
 

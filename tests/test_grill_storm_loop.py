@@ -274,7 +274,7 @@ class GrillStormLoopTest(unittest.TestCase):
     def test_step_passes_through_ask_user_after_two_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
             self.write_docs(project_dir, decisions=decisions)
             (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Which owner approves execution? | Recommended: preflight\n", encoding="utf-8")
 
@@ -286,13 +286,41 @@ class GrillStormLoopTest(unittest.TestCase):
     def test_step_passes_through_ready_for_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n"
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Ask late.\n\n### 2026-05-11 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Keep preflight gate.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved planning docs.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: planner\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n\n### 2026-05-12 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-12 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n"
             self.write_docs(project_dir, decisions=decisions)
             (project_dir / "docs" / "spec.md").write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- [x] Docs converge.\n", encoding="utf-8")
-            (project_dir / "docs" / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Verify: tests pass.\n", encoding="utf-8")
+            (project_dir / "docs" / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Files: workflow/grill_storm.py\n   Run: python -m unittest tests.test_grill_storm_loop -v\n   Expected: PASS\n   Verify: tests pass.\n\n## Rollback / Safety\n- Revert loop dispatch.\n", encoding="utf-8")
 
             payload = run_planning_step(project_dir, run_root=project_dir / ".yolo")
 
             self.assertEqual(payload["status"], "ready_for_execution")
             self.assertIn("spec", payload)
             self.assertIn("plan", payload)
+
+    def test_loop_dispatches_planner_spec_authoring_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Planner\n- Status: accepted\n- Actor: planner\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n"
+            self.write_docs(project_dir, decisions=decisions)
+            (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] None.\n", encoding="utf-8")
+
+            payload = run_planning_step(project_dir, run_root=project_dir / ".yolo")
+
+            self.assertEqual(payload["status"], "dispatch_required")
+            dispatch = payload["dispatch_request"]
+            self.assertEqual(dispatch["role"], "planner")
+            self.assertEqual(dispatch["planning_mode"], "logos-spec-writer")
+            self.assertIn("logos-spec-writer", dispatch["agent_prompt"])
+            self.assertIn("docs/spec.md", dispatch["write_any_of"])
+
+    def test_loop_passes_through_human_dialogue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Interviewer\n- Status: accepted\n- Actor: interviewer\n- Decision: Muse explored options.\n\n### 2026-05-12 - Planner consensus\n- Status: accepted\n- Actor: planner\n- Source: consensus-candidate\n- Decision: Surface one approach.\n- Consensus: Controller gates | Summary: add state gates | Tradeoffs: clear ownership | Recommended: true\n"
+            self.write_docs(project_dir, decisions=decisions)
+            (project_dir / "docs" / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] None.\n", encoding="utf-8")
+
+            payload = run_planning_step(project_dir, run_root=project_dir / ".yolo")
+
+            self.assertEqual(payload["status"], "human_dialogue")
+            self.assertEqual(payload["dialogue_type"], "consensus")

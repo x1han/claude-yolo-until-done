@@ -22,6 +22,8 @@ REQUIRED_OUTPUT_SCHEMA = {
     "next_recommendation": "what the peer or orchestrator should do next",
 }
 
+DISPATCHABLE_STATUSES = {"needs_internal_round", "needs_spec_authoring", "needs_spec_self_review", "needs_plan_authoring"}
+
 
 def build_agent_prompt(dispatch: dict) -> str:
     role = dispatch["role"]
@@ -29,11 +31,15 @@ def build_agent_prompt(dispatch: dict) -> str:
     lines = [
         f"You are the {display} agent in a grill-storm planning loop.",
         f"Round {dispatch['round']}.",
+    ]
+    if dispatch.get("planning_mode"):
+        lines.append(f"Planning mode: {dispatch['planning_mode']}.")
+    lines.extend([
         "",
         f"Reason for dispatch: {dispatch['reason']}",
         "",
         "## Docs you must read",
-    ]
+    ])
     for path in dispatch.get("read", []):
         lines.append(f"- {path}")
     lines.append("")
@@ -88,6 +94,7 @@ def build_dispatch_request(project_dir: Path, status: dict, *, run_root: Path | 
         "project_dir": str(project_dir.resolve()),
         "docs_dir": docs_dir_arg,
         "run_root": str(resolved_run_root) if resolved_run_root is not None else "",
+        "planning_mode": str(status.get("planning_mode", "")),
         "read": remap_docs_paths(list(status.get("read", [])), docs_dir_arg),
         "write_any_of": remap_docs_paths(list(status.get("write_any_of", [])), docs_dir_arg),
         "reason": str(status.get("reason", "")),
@@ -154,7 +161,7 @@ def record_round_result(dispatch: dict, result: dict, now: str | None = None) ->
 
 def run_planning_step(project_dir: Path, *, run_root: Path | None = None, docs_dir_arg: str = "docs", max_rounds: int = 6) -> dict:
     status = status_payload(project_dir.resolve(), docs_dir_arg)
-    if status.get("status") != "needs_internal_round":
+    if status.get("status") not in DISPATCHABLE_STATUSES:
         return status
     round_number = next_round_number(run_root)
     if round_number > max_rounds:

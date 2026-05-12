@@ -36,7 +36,8 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 - Planning loop command: use `workflow/grill_storm_loop.py next --project-dir <output-folder> --run-root <output-folder>/.yolo` to get either a terminal planning status or a structured `dispatch_required` payload.
 - When `dispatch_required` is returned, call the Claude Code `Agent` tool for the requested `Interviewer` or `Planner`, then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
 - `Interviewer` and `Planner` communicate through the docs mailbox and role summaries, not hidden chat-only state.
-- Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and ask user only when blocking high-impact gap remains.
+- Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and return `human_dialogue` for consensus or joint uncertainty.
+- human-approved spec and human-approved plan are required: record `Source: spec-review` before plan authoring and `Source: plan-review` before execution.
 - New run default: approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, pass `workflow/validate_grill_docs.py`, and `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
 - New run override: both `--spec` and `--plan` point to existing approved planning artifacts outside the default grill-storm docs.
 - Planning-needed run: if default grill-storm docs are missing or draft, stop before bootstrap and report the planning action needed.

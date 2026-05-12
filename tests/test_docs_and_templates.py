@@ -31,6 +31,9 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "shared planning docs",
                 "one key question",
                 "recommended answer",
+                "consensus candidates",
+                "joint uncertainty",
+                "Do not write final spec or plan.",
             ],
             ".claude/agents/planner.md": [
                 "Logos",
@@ -40,6 +43,11 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "spec",
                 "plan",
                 "Do not write unconfirmed assumptions as final conclusions.",
+                "logos-converger",
+                "logos-spec-writer",
+                "logos-spec-reviewer",
+                "logos-plan-writer",
+                "Do not mark spec or plan approved without human approval.",
             ],
         }
         for relative, required_strings in cases.items():
@@ -170,6 +178,9 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "# Decisions",
                 "## Decision Log",
                 "Status: accepted",
+                "Source: consensus",
+                "Source: spec-review",
+                "Source: plan-review",
             ],
             "docs/spec.md": [
                 "# Spec",
@@ -220,7 +231,16 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertIn("Agent", skill)
         self.assertIn("session_action", skill)
         self.assertIn("persistent", skill.lower())
+        self.assertIn("human_dialogue", skill)
+        self.assertIn("consensus", skill)
+        self.assertIn("joint_uncertainty", skill)
+        self.assertIn("needs_spec_self_review", skill)
+        self.assertIn("human_spec_review", skill)
+        self.assertIn("human_plan_review", skill)
         self.assertIn("workflow/grill_storm_loop.py", root_skill)
+        self.assertIn("human_dialogue", root_skill)
+        self.assertIn("human-approved spec", root_skill)
+        self.assertIn("human-approved plan", root_skill)
         self.assertIn("docs mailbox", required_authoring)
 
     def test_hook_template_contains_only_lifecycle_groups(self) -> None:
