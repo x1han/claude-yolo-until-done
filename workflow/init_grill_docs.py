@@ -54,8 +54,10 @@ def build_decisions_template() -> str:
     return (
         "# Decisions\n\n"
         "## Decision Log\n\n"
-        "### 2026-05-10 - Decision Title\n"
-        "- Status: accepted\n"
+        "Record accepted Interviewer and Planner rounds here. Do not mark template examples accepted.\n\n"
+        "### 2026-05-10 - Example decision title\n"
+        "- Status: draft\n"
+        "- Actor: interviewer\n"
         "- Decision:\n"
         "- Reason:\n"
         "- Alternatives considered:\n"
@@ -67,6 +69,7 @@ def build_decisions_template() -> str:
 def build_spec_template() -> str:
     return (
         "# Spec\n\n"
+        "Status: draft\n\n"
         "## Problem\n"
         "- \n\n"
         "## Users\n"
@@ -93,6 +96,7 @@ def build_spec_template() -> str:
 def build_plan_template() -> str:
     return (
         "# Plan\n\n"
+        "Status: draft\n\n"
         "## Goal\n"
         "- \n\n"
         "## Steps\n"

@@ -23,28 +23,26 @@ Do not start execution until grill-storm loop has produced:
 
 This workflow still keeps execution and planning separate.
 
-## 3. Bootstrap Run Root
+## 3. Run Preflight
 
 From output folder:
 
 ```bash
-python <skill-repo>/workflow/bootstrap.py \
-  --spec <output-folder>/docs/spec.md \
-  --plan <output-folder>/docs/plan.md \
-  --run-root <output-folder>/.yolo \
+python <skill-repo>/workflow/preflight.py \
+  --project-dir <output-folder> \
+  --run-root .yolo \
   --goal "Fix requested problem and verify it." \
   --success-criterion "Requested files are updated exactly as required." \
   --success-criterion "Verification command passes freshly." \
   --success-criterion "Workflow reaches valid completion."
 ```
 
-Default is acyclic mode. For loop mode, bootstrap with a stop policy:
+Default is acyclic mode. For loop mode, preflight with a stop policy:
 
 ```bash
-python <skill-repo>/workflow/bootstrap.py \
-  --spec <output-folder>/docs/spec.md \
-  --plan <output-folder>/docs/plan.md \
-  --run-root <output-folder>/.yolo \
+python <skill-repo>/workflow/preflight.py \
+  --project-dir <output-folder> \
+  --run-root .yolo \
   --goal "Improve until loop policy stops." \
   --success-criterion "Each iteration is reviewed before the next starts." \
   --mode loop \
@@ -54,7 +52,7 @@ python <skill-repo>/workflow/bootstrap.py \
 
 `--loop-max-iterations` is stop policy A, `--loop-stop-on-convergence` is stop policy B, and A+B uses either stop condition. On continue-run, preflight rejects mode/config drift from existing `state.json`.
 
-## 4. Run Preflight On Skill Load
+## 4. Continue From Preflight Result
 
 When skill is loaded, run preflight first:
 
@@ -83,7 +81,7 @@ This writes `.claude/settings.local.json` in output folder.
 claude --dangerously-skip-permissions
 ```
 
-Without that flag, workflow should fail closed.
+Without that flag, preflight reports a runtime warning and autonomy may be weaker.
 
 Do not start claude-yolo from headless `claude -p` print mode. Workflow depends on interactive stop/resume behavior that current print mode does not preserve.
 

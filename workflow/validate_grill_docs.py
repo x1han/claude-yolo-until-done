@@ -59,16 +59,38 @@ def status_value(body: str) -> str:
     return match.group(1).strip().lower() if match else ""
 
 
-def actor_decision_count(decisions: str, actor: str) -> int:
-    pattern = re.compile(r"^- Status:\s*accepted\s*$[\s\S]*?^- Actor:\s*" + re.escape(actor) + r"\s*$", re.MULTILINE | re.IGNORECASE)
-    return len(pattern.findall(decisions))
+def decision_blocks(decisions: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for line in decisions.splitlines():
+        if line.startswith("### "):
+            if current:
+                blocks.append("\n".join(current))
+            current = [line]
+            continue
+        if current:
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def field_value(text: str, field: str, *, bullet: bool = False, normalize: bool = False) -> str:
+    prefix = r"^-\s*" if bullet else r"(?:^|\|)\s*(?:- \[ \]\s*)?"
+    match = re.search(prefix + re.escape(field) + r":\s*([^|\n]+)", text, flags=re.MULTILINE | re.IGNORECASE)
+    value = match.group(1).strip() if match else ""
+    return value.lower() if normalize else value
 
 
 def internal_rounds(decisions: str) -> dict[str, int]:
-    return {
-        "interviewer": actor_decision_count(decisions, "interviewer"),
-        "planner": actor_decision_count(decisions, "planner"),
-    }
+    rounds = {"interviewer": 0, "planner": 0}
+    for block in decision_blocks(decisions):
+        if field_value(block, "Status", bullet=True, normalize=True) != "accepted":
+            continue
+        actor = field_value(block, "Actor", bullet=True, normalize=True)
+        if actor in rounds:
+            rounds[actor] += 1
+    return rounds
 
 
 def has_template_only_lines(body: str) -> bool:
@@ -80,21 +102,37 @@ def has_template_only_lines(body: str) -> bool:
 
 def blocking_questions(open_questions: str) -> list[dict[str, str]]:
     questions: list[dict[str, str]] = []
+    current_section = ""
+    current: dict[str, str] | None = None
     for line in open_questions.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("- [ ]"):
+        if stripped.startswith("## "):
+            current_section = stripped[3:].strip().lower()
+            current = None
             continue
-        if "Blocking: yes" not in stripped:
+        if stripped.startswith("- [ ]"):
+            current = {
+                "section": current_section,
+                "blocking": field_value(stripped, "Blocking", normalize=True),
+                "question": field_value(stripped, "Question"),
+                "recommended_answer": field_value(stripped, "Recommended"),
+                "raw": stripped,
+            }
+            if current_section == "high priority" and current["blocking"] == "yes":
+                questions.append(current)
             continue
-        question = ""
-        recommended = ""
-        question_match = re.search(r"Question:\s*([^|]+)", stripped)
-        recommended_match = re.search(r"Recommended:\s*(.+)$", stripped)
-        if question_match:
-            question = question_match.group(1).strip()
-        if recommended_match:
-            recommended = recommended_match.group(1).strip()
-        questions.append({"question": question, "recommended_answer": recommended, "raw": stripped})
+        if current is None or not line.startswith("  "):
+            continue
+        current["raw"] = f"{current['raw']}\n{stripped}"
+        question = field_value(stripped, "Question")
+        recommended = field_value(stripped, "Recommended")
+        blocking = field_value(stripped, "Blocking", normalize=True)
+        if question:
+            current["question"] = question
+        if recommended:
+            current["recommended_answer"] = recommended
+        if blocking:
+            current["blocking"] = blocking
     return questions
 
 
@@ -120,6 +158,11 @@ def approved_docs_report(project_dir: Path, docs_dir_arg: str = "docs") -> dict[
     blockers = blocking_questions(bundle["open_questions"])
     if blockers:
         errors.append("open-questions.md still contains blocking high-impact questions")
+    for blocker in blockers:
+        if not blocker["question"]:
+            errors.append("open-questions.md has blocking high-impact question without Question field")
+        if not blocker["recommended_answer"]:
+            errors.append("open-questions.md has blocking high-impact question without Recommended field")
 
     if "## Acceptance Criteria" not in bundle["spec"]:
         errors.append("spec.md is missing acceptance criteria")

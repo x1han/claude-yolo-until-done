@@ -22,7 +22,7 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 
 ## Required Operating Mode
 - Claude Code hooks are mandatory for execution phase. If hooks are unavailable, this workflow must fail closed and stop.
-- `--dangerously-skip-permissions` is mandatory for execution phase. If it was not enabled for current Claude Code run, this workflow must fail closed and stop.
+- `--dangerously-skip-permissions` is recommended for autonomous execution. If preflight cannot verify it, report a runtime warning instead of failing closed.
 - Interactive Claude Code is mandatory for execution phase. Headless `claude -p` print mode is not supported because Stop-hook blocking cannot keep unfinished claude-yolo run alive there.
 - preflight owns startup classification. If approved plan and spec exist but run root does not yet exist, preflight should bootstrap new run with `workflow/bootstrap.py` instead of failing just because `.yolo/` is absent.
 - Only continue-run path should fail closed for missing durable state. Once run root already exists, missing or incomplete `state.json` or `trace.md` must block continuation.
@@ -33,6 +33,9 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 
 ## Startup Contract
 - Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
+- Planning loop command: use `workflow/grill_storm_loop.py next --project-dir <output-folder> --run-root <output-folder>/.yolo` to get either a terminal planning status or a structured `dispatch_required` payload.
+- When `dispatch_required` is returned, call the Claude Code `Agent` tool for the requested `Interviewer` or `Planner`, then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
+- `Interviewer` and `Planner` communicate through the docs mailbox and role summaries, not hidden chat-only state.
 - Planning loop: `Interviewer` and `Planner` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and ask user only when blocking high-impact gap remains.
 - New run default: approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, pass `workflow/validate_grill_docs.py`, and `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
 - New run override: both `--spec` and `--plan` point to existing approved planning artifacts outside the default grill-storm docs.

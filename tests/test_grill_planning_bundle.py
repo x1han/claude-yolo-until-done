@@ -62,9 +62,13 @@ class GrillPlanningBundleTest(unittest.TestCase):
             self.assertIn("## High Priority", open_questions)
             self.assertIn("# Decisions", decisions)
             self.assertIn("## Decision Log", decisions)
+            self.assertIn("Status: draft", decisions)
+            self.assertNotIn("Status: accepted", decisions)
             self.assertIn("# Spec", spec)
+            self.assertIn("Status: draft", spec)
             self.assertIn("## Acceptance Criteria", spec)
             self.assertIn("# Plan", plan)
+            self.assertIn("Status: draft", plan)
             self.assertIn("## Steps", plan)
             self.assertIn("Rollback / Safety", plan)
 

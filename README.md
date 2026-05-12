@@ -18,7 +18,7 @@ Use this workflow only when all of following are true:
 - approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, or both `--spec` and `--plan` name existing approved artifacts
 - approved implementation plan is execution-ready
 - Claude Code hooks are available for execution phase
-- Claude Code is launched with `--dangerously-skip-permissions` for execution phase
+- Claude Code is preferably launched with `--dangerously-skip-permissions` for autonomous execution; preflight reports a warning if it cannot verify the flag
 - session is interactive Claude Code, not headless `claude -p` print mode
 
 If assumptions are not true, workflow should fail closed.

@@ -128,6 +128,119 @@ class GrillStormRuntimeTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("spec.md is not approved", result.stderr)
 
+    def test_grill_storm_parses_multiline_blocking_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] Blocking: yes\n  Question: Which gate owns planning readiness?\n  Recommended: preflight validator\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "ask_user")
+            self.assertEqual(payload["question"], "Which gate owns planning readiness?")
+            self.assertEqual(payload["recommended_answer"], "preflight validator")
+
+    def test_grill_storm_ignores_low_priority_blocking_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n\n## Low Priority\n- [ ] Blocking: yes | Question: Should docs mention color? | Recommended: no\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(payload["status"], "ask_user")
+
+    def test_validate_grill_docs_rejects_cross_block_actor_status_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Accepted without actor\n- Status: accepted\n- Decision: Missing actor must not satisfy round.\n\n### 2026-05-10 - Draft planner\n- Status: draft\n- Actor: planner\n- Decision: Draft planner must not satisfy round.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GRILL_DOCS_PATH), "--project-dir", str(project_dir)],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("decisions.md is missing accepted interviewer internal round", result.stderr)
+            self.assertIn("decisions.md is missing accepted planner internal round", result.stderr)
+
+    def test_grill_storm_treats_blocking_field_case_insensitively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] blocking: YES | question: Which gate owns planning readiness? | recommended: preflight validator\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "ask_user")
+            self.assertEqual(payload["question"], "Which gate owns planning readiness?")
+            self.assertEqual(payload["recommended_answer"], "preflight validator")
+
+    def test_validate_grill_docs_rejects_empty_blocking_question_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(
+                project_dir,
+                spec_status="approved",
+                plan_status="approved",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] Blocking: yes\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Interviewer scope pass\n- Status: accepted\n- Actor: interviewer\n- Decision: Need preflight gate.\n\n### 2026-05-10 - Planner challenge pass\n- Status: accepted\n- Actor: planner\n- Decision: Keep validator separate.\n",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GRILL_DOCS_PATH), "--project-dir", str(project_dir)],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("without Question field", result.stderr)
+            self.assertIn("without Recommended field", result.stderr)
+
     def test_validate_grill_docs_accepts_approved_external_brain_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)

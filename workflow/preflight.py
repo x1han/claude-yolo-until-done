@@ -42,12 +42,13 @@ def verify_runtime() -> dict:
         raise SystemExit(f"Unsupported Claude Code entrypoint: {entrypoint}")
 
     process_chain = read_process_chain()
-    if "--dangerously-skip-permissions" not in process_chain:
-        raise SystemExit("Could not positively verify --dangerously-skip-permissions for the current Claude Code session.")
+    skip_permissions_verified = "--dangerously-skip-permissions" in process_chain
 
     return {
         "entrypoint": entrypoint or ACTIVE_ENTRYPOINT,
         "process_chain": process_chain,
+        "skip_permissions_verified": skip_permissions_verified,
+        "warnings": [] if skip_permissions_verified else ["Could not positively verify --dangerously-skip-permissions for the current Claude Code session."],
     }
 
 
@@ -312,6 +313,8 @@ def main() -> int:
             "trace_path": bootstrap_summary["trace_path"],
             "checklist_path": bootstrap_summary["checklist_path"],
             "runtime_entrypoint": runtime["entrypoint"],
+            "skip_permissions_verified": runtime["skip_permissions_verified"],
+            "runtime_warnings": runtime["warnings"],
             "mode": args.mode,
             "loop": requested_loop,
         }
@@ -363,6 +366,8 @@ def main() -> int:
         "owner": state.get("owner"),
         "next_action": state.get("next_action"),
         "runtime_entrypoint": runtime["entrypoint"],
+            "skip_permissions_verified": runtime["skip_permissions_verified"],
+            "runtime_warnings": runtime["warnings"],
         "dispatch_recovery": dispatch_recovery,
     }
     print(json.dumps(payload, ensure_ascii=True))

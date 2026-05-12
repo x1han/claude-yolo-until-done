@@ -15,10 +15,12 @@ from agent_sessions import (
     ROLE_NAMES,
     agent_log_path,
     agent_sessions_path,
+    append_planning_round,
     append_role_log_entry,
     build_replacement_prompt_context,
     ensure_agent_session_files,
     load_agent_sessions,
+    load_planning_rounds,
     replace_role_session,
     resolve_role_session,
 )
@@ -150,3 +152,54 @@ class AgentSessionsTest(unittest.TestCase):
             self.assertIn("worker submit", context["trace_tail"])
             self.assertIn("Read controller.", context["role_log_tail"])
             self.assertIn("last_dispatch", context["state_json"])
+
+    def test_append_planning_round_persists_role_rounds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            ensure_agent_session_files(run_root)
+
+            record = append_planning_round(
+                run_root,
+                {
+                    "role": "interviewer",
+                    "round": 1,
+                    "status": "completed",
+                    "docs_touched": ["docs/intent.md", "docs/decisions.md"],
+                    "summary": "Confirmed execution gate ownership.",
+                    "decisions_recorded": ["Preflight owns execution readiness."],
+                    "questions_added": [],
+                    "next_recommendation": "Planner should compare validator placement options.",
+                },
+                now="2026-05-11T01:00:00+00:00",
+            )
+
+            self.assertEqual(record["role"], "interviewer")
+            self.assertEqual(record["round"], 1)
+            rounds = load_planning_rounds(run_root)
+            self.assertEqual(rounds[0]["summary"], "Confirmed execution gate ownership.")
+            self.assertEqual(rounds[0]["recorded_at"], "2026-05-11T01:00:00+00:00")
+            log_text = agent_log_path(run_root, "interviewer").read_text(encoding="utf-8")
+            self.assertIn("planning round 1", log_text)
+            self.assertIn("Confirmed execution gate ownership.", log_text)
+
+    def test_append_planning_round_rejects_non_planning_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+
+            with self.assertRaises(ValueError) as raised:
+                append_planning_round(
+                    run_root,
+                    {
+                        "role": "worker",
+                        "round": 1,
+                        "status": "completed",
+                        "docs_touched": [],
+                        "summary": "bad",
+                        "decisions_recorded": [],
+                        "questions_added": [],
+                        "next_recommendation": "bad",
+                    },
+                    now="2026-05-11T01:00:00+00:00",
+                )
+
+            self.assertIn("Unsupported planning role agent", str(raised.exception))

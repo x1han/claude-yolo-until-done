@@ -7,13 +7,20 @@ from uuid import uuid4
 from state import atomic_write_text, utc_now
 
 AGENT_SESSIONS_FILE_NAME = "agent_sessions.json"
+PLANNING_ROUNDS_FILE_NAME = "planning_rounds.json"
 AGENTS_DIR_NAME = "agents"
 ROLE_NAMES = ("worker", "watcher", "helper", "interviewer", "planner")
+PLANNING_ROLE_NAMES = ("interviewer", "planner")
 SESSION_STATUSES = {"", "active", "replaced", "failed"}
+PLANNING_ROUND_STATUSES = {"completed", "blocked", "failed"}
 
 
 def agent_sessions_path(run_root: Path) -> Path:
     return run_root / AGENT_SESSIONS_FILE_NAME
+
+
+def planning_rounds_path(run_root: Path) -> Path:
+    return run_root / PLANNING_ROUNDS_FILE_NAME
 
 
 def agents_dir(run_root: Path) -> Path:
@@ -23,6 +30,11 @@ def agents_dir(run_root: Path) -> Path:
 def require_role(role: str) -> None:
     if role not in ROLE_NAMES:
         raise ValueError(f"Unsupported role agent: {role}")
+
+
+def require_planning_role(role: str) -> None:
+    if role not in PLANNING_ROLE_NAMES:
+        raise ValueError(f"Unsupported planning role agent: {role}")
 
 
 def agent_log_path(run_root: Path, role: str) -> Path:
@@ -127,6 +139,74 @@ def ensure_agent_session_files(run_root: Path) -> dict:
     ensure_agent_logs(run_root)
     write_agent_sessions(run_root, payload)
     return payload
+
+
+def load_planning_rounds(run_root: Path) -> list[dict]:
+    path = planning_rounds_path(run_root)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("planning_rounds.json is malformed: invalid JSON") from exc
+    if not isinstance(payload, list):
+        raise ValueError("planning_rounds.json is malformed: root must be array")
+    return payload
+
+
+def write_planning_rounds(run_root: Path, payload: list[dict]) -> None:
+    run_root.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(planning_rounds_path(run_root), json.dumps(payload, indent=2, ensure_ascii=True) + "\n")
+
+
+def append_planning_round(run_root: Path, record: dict, now: str | None = None) -> dict:
+    role = str(record.get("role", ""))
+    require_planning_role(role)
+    status = str(record.get("status", ""))
+    if status not in PLANNING_ROUND_STATUSES:
+        raise ValueError(f"Invalid planning round status: {status}")
+    round_number = record.get("round")
+    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 1:
+        raise ValueError("Invalid planning round number")
+    docs_touched = record.get("docs_touched", [])
+    decisions_recorded = record.get("decisions_recorded", [])
+    questions_added = record.get("questions_added", [])
+    for field_name, value in (
+        ("docs_touched", docs_touched),
+        ("decisions_recorded", decisions_recorded),
+        ("questions_added", questions_added),
+    ):
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"Invalid planning round {field_name}")
+    summary = str(record.get("summary", "")).strip()
+    if not summary:
+        raise ValueError("Invalid planning round summary")
+    observed_at = now or timestamp()
+    persisted = {
+        "recorded_at": observed_at,
+        "role": role,
+        "round": round_number,
+        "status": status,
+        "docs_touched": docs_touched,
+        "summary": summary,
+        "decisions_recorded": decisions_recorded,
+        "questions_added": questions_added,
+        "next_recommendation": str(record.get("next_recommendation", "")).strip(),
+    }
+    rounds = load_planning_rounds(run_root)
+    rounds.append(persisted)
+    write_planning_rounds(run_root, rounds)
+    append_role_log_entry(
+        run_root,
+        role,
+        f"planning round {round_number}",
+        actions=[f"Status: {status}"],
+        observations=[summary],
+        result=[f"Docs touched: {', '.join(docs_touched) if docs_touched else 'none'}"],
+        next_steps=[persisted["next_recommendation"]] if persisted["next_recommendation"] else [],
+        now=observed_at,
+    )
+    return persisted
 
 
 def timestamp() -> str:

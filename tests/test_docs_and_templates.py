@@ -25,11 +25,17 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "verification evidence",
             ],
             ".claude/agents/interviewer.md": [
+                "Muse",
+                "right-brain",
+                "1-3 adjacent but divergent possibilities",
                 "shared planning docs",
                 "one key question",
                 "recommended answer",
             ],
             ".claude/agents/planner.md": [
+                "Logos",
+                "left-brain",
+                "logical spec/plan architect",
                 "shared planning docs",
                 "spec",
                 "plan",
@@ -128,6 +134,8 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertIn("Only continue-run path should fail closed for missing durable state", skill)
         self.assertIn("same-run claude-yolo hook groups", skill)
         self.assertIn("init_grill_docs.py", quickstart)
+        self.assertIn("workflow/preflight.py", quickstart)
+        self.assertNotIn("workflow/bootstrap.py", quickstart)
         self.assertIn("classify run as new-run or continue-run", quickstart)
         self.assertIn("install current local claude-yolo hook set", quickstart)
         self.assertIn("## New run", required_inputs)
@@ -185,15 +193,35 @@ class DocsAndTemplatesTest(unittest.TestCase):
         skill_path = SKILL_ROOT / ".claude" / "skills" / "grill-storm" / "SKILL.md"
         body = skill_path.read_text(encoding="utf-8")
         self.assertIn("name: grill-storm", body)
-        self.assertIn("Interviewer and Planner do most discussion before the user sees anything", body)
+        self.assertIn("Muse/Interviewer and Logos/Planner do most discussion before the user sees anything", body)
         self.assertIn("workflow/grill_storm.py", body)
         self.assertIn("workflow/validate_grill_docs.py", body)
-        self.assertIn("ask user only after both agents have recorded accepted internal rounds", body)
+        self.assertIn("Ask user only after both agents have recorded accepted internal rounds", body)
+        self.assertIn("does not launch agents by itself", body)
+        self.assertIn("dispatch or continue Muse/Interviewer or Logos/Planner", body)
+        self.assertIn("1-3 adjacent divergent expansions", body)
+        self.assertIn("2-3 approaches with tradeoffs and recommendation", body)
         self.assertIn("docs/intent.md", body)
         self.assertIn("docs/open-questions.md", body)
         self.assertIn("docs/decisions.md", body)
         self.assertIn("docs/spec.md", body)
         self.assertIn("docs/plan.md", body)
+
+    def test_grill_storm_docs_describe_planning_loop_dispatch(self) -> None:
+        skill = (SKILL_ROOT / ".claude" / "skills" / "grill-storm" / "SKILL.md").read_text(encoding="utf-8")
+        root_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        required_authoring = (SKILL_ROOT / "policy" / "required-authoring.md").read_text(encoding="utf-8")
+
+        self.assertIn("workflow/grill_storm.py --status", skill)
+        self.assertIn("workflow/grill_storm_loop.py", skill)
+        self.assertIn("docs mailbox", skill)
+        self.assertIn("dispatch request", skill)
+        self.assertIn("agent_prompt", skill)
+        self.assertIn("Agent", skill)
+        self.assertIn("session_action", skill)
+        self.assertIn("persistent", skill.lower())
+        self.assertIn("workflow/grill_storm_loop.py", root_skill)
+        self.assertIn("docs mailbox", required_authoring)
 
     def test_hook_template_contains_only_lifecycle_groups(self) -> None:
         payload = json.loads((SKILL_ROOT / "templates" / "claude-settings-local.example.json").read_text(encoding="utf-8"))

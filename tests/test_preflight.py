@@ -1167,7 +1167,7 @@ class PreflightTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing hook_config_hash", result.stderr)
 
-    def test_preflight_rejects_runtime_without_skip_permissions_proof(self) -> None:
+    def test_preflight_warns_runtime_without_skip_permissions_proof(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -1190,9 +1190,9 @@ class PreflightTest(unittest.TestCase):
                     "--run-root",
                     ".yolo",
                     "--goal",
-                    "Reject unsupported runtime.",
+                    "Warn about unsupported runtime.",
                     "--success-criterion",
-                    "missing permission proof fails closed.",
+                    "missing permission proof is reported as warning.",
                 ],
                 cwd=project_dir,
                 capture_output=True,
@@ -1201,10 +1201,12 @@ class PreflightTest(unittest.TestCase):
                 env=env,
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("dangerously-skip-permissions", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["skip_permissions_verified"])
+            self.assertIn("dangerously-skip-permissions", payload["runtime_warnings"][0])
 
-    def test_preflight_rejects_spoofed_process_chain_override(self) -> None:
+    def test_preflight_ignores_spoofed_process_chain_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -1228,7 +1230,7 @@ class PreflightTest(unittest.TestCase):
                     "--run-root",
                     ".yolo",
                     "--goal",
-                    "Reject spoofed runtime proof.",
+                    "Ignore spoofed runtime proof.",
                     "--success-criterion",
                     "env override cannot fake permission proof.",
                 ],
@@ -1239,8 +1241,10 @@ class PreflightTest(unittest.TestCase):
                 env=env,
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("dangerously-skip-permissions", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["skip_permissions_verified"])
+            self.assertIn("dangerously-skip-permissions", payload["runtime_warnings"][0])
 
     def test_preflight_rejects_continue_run_when_state_version_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
