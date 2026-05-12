@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-This file governs the inner software repository layer at `/datf/hanxi/software/claude-yolo-until-done/source`.
+This file governs the inner software repository layer at `/datf/hanxi/software/claude-yolo-until-done/repo`.
 
 ## Scope
 - This repository owns shipped software for `claude-yolo-until-done`.
 - It owns tracked tests, public docs, packaging-facing files, branches, remotes, releases, and software worktrees.
-- Local-only workflow archives and validation runs do not belong here; they live in the outer workspace layer under `../workflow/`.
+- Local-only workflow archives and validation runs do not belong here; they live in the outer workspace layer under `../workspace/`.
 
 ## Git authority
 - Run software git actions from this repository layer only.
@@ -20,7 +20,7 @@ This file governs the inner software repository layer at `/datf/hanxi/software/c
 ## Repository guidance
 - Keep shipped code, tracked tests, and public operator docs in this repository.
 - Keep implementation aligned with the fail-closed workflow model described by the skill, policy, stage, and hook files.
-- Do not move durable plans, validation traces, or local-only notes into this repository; store them in `../workflow/`.
+- Do not move durable plans, validation traces, or local-only notes into this repository; store them in `../workspace/`.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
