@@ -62,7 +62,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
         )
         (docs_dir / "open-questions.md").write_text(
             open_questions
-            or "# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Which API should own execution gate? | Recommended: preflight validator\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n\n## Answered Recently\n- [x] Question: initial scope\n  Answer: built-in grill-storm\n  Impact: no external superpowers dependency\n",
+            or "# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Which API should own execution gate? | Recommended: preflight validator\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n\n## Answered Recently\n- [x] Question: initial scope\n  Answer: first-party grill-storm\n  Impact: no external superpowers dependency\n",
             encoding="utf-8",
         )
         (docs_dir / "decisions.md").write_text(
@@ -74,7 +74,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
             encoding="utf-8",
         )
         (docs_dir / "plan.md").write_text(
-            f"# Plan\n\nStatus: {plan_status}\n\n## Goal\n- Implement hard gate.\n\n## Steps\n1. Step: Add validator.\n   Files: workflow/validate_grill_docs.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Run validator tests.\n2. Step: Wire preflight.\n   Files: workflow/preflight.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Preflight rejects drafts.\n3. Step: Document built-in skill.\n   Files: .claude/skills/grill-storm/SKILL.md\n   Run: python -m unittest tests.test_docs_and_templates -v\n   Expected: PASS\n   Verify: Docs test passes.\n\n## Dependencies\n- Local docs.\n\n## File/Area Impact\n- workflow/preflight.py\n\n## Tests\n- python -m unittest tests.test_grill_storm_runtime -v\n\n## Rollback / Safety\n- Remove gate wiring.\n",
+            f"# Plan\n\nStatus: {plan_status}\n\n## Goal\n- Implement hard gate.\n\n## Steps\n1. Step: Add validator.\n   Files: workflow/validate_grill_docs.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Run validator tests.\n2. Step: Wire preflight.\n   Files: workflow/preflight.py\n   Run: python -m unittest tests.test_grill_storm_runtime -v\n   Expected: PASS\n   Verify: Preflight rejects drafts.\n3. Step: Document first-party skill.\n   Files: skills/grill-storm/SKILL.md\n   Run: python -m unittest tests.test_docs_and_templates -v\n   Expected: PASS\n   Verify: Docs test passes.\n\n## Dependencies\n- Local docs.\n\n## File/Area Impact\n- workflow/preflight.py\n\n## Tests\n- python -m unittest tests.test_grill_storm_runtime -v\n\n## Rollback / Safety\n- Remove gate wiring.\n",
             encoding="utf-8",
         )
         return docs_dir
@@ -311,7 +311,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
                 project_dir,
                 spec_status="approved",
                 plan_status="approved",
-                open_questions="# Open Questions\n\n## High Priority\n- [x] Question: gate owner\n  Answer: preflight validator\n  Impact: fail closed before execution\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n\n## Answered Recently\n- [x] Question: initial scope\n  Answer: built-in grill-storm\n  Impact: no external superpowers dependency\n",
+                open_questions="# Open Questions\n\n## High Priority\n- [x] Question: gate owner\n  Answer: preflight validator\n  Impact: fail closed before execution\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n\n## Answered Recently\n- [x] Question: initial scope\n  Answer: first-party grill-storm\n  Impact: no external superpowers dependency\n",
                 decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-10 - Muse scope pass\n- Status: accepted\n- Actor: muse\n- Decision: Need preflight gate.\n- Reason: Execution must fail closed.\n- Alternatives considered: docs only.\n- Impact: adds validator.\n- Revisit when: validator too strict.\n\n### 2026-05-10 - Logos challenge pass\n- Status: accepted\n- Actor: logos\n- Decision: Keep validator separate from controller.\n- Reason: Planning gate owns authoring readiness.\n- Alternatives considered: controller-only check.\n- Impact: clearer ownership.\n- Revisit when: preflight grows too large.\n" + self.human_gate_decisions(),
             )
 
@@ -339,7 +339,7 @@ class GrillStormRuntimeTest(unittest.TestCase):
                 spec_status="approved",
                 plan_status="approved",
                 open_questions="# Open Questions\n\n## High Priority\n- [x] Question: review scope\n  Answer: inspect supplied code changes\n  Impact: watcher must review current diff only\n\n## Medium Priority\n- [ ] None.\n\n## Low Priority\n- [ ] None.\n",
-                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse scope pass\n- Status: accepted\n- Actor: muse\n- Decision: Code review loop should use built-in grill-storm docs.\n\n### 2026-05-11 - Logos challenge pass\n- Status: accepted\n- Actor: logos\n- Decision: Plan contains one repeatable review task with verification.\n" + self.human_gate_decisions(),
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse scope pass\n- Status: accepted\n- Actor: muse\n- Decision: Code review loop should use first-party grill-storm docs.\n\n### 2026-05-11 - Logos challenge pass\n- Status: accepted\n- Actor: logos\n- Decision: Plan contains one repeatable review task with verification.\n" + self.human_gate_decisions(),
             )
             (project_dir / "docs" / "plan.md").write_text(
                 "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Code review iteration\nReview the current code changes.\nFiles: workflow/orchestrator.py\nRun: python -m unittest tests.test_controller_review_flow -v\nExpected: PASS\nVerify: watcher records review evidence for this iteration.\n\n## Rollback / Safety\n- Stop loop before next iteration.\n",

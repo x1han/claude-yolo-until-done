@@ -159,7 +159,7 @@ class DocsAndTemplatesTest(unittest.TestCase):
         quickstart = (SKILL_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         required_inputs = (SKILL_ROOT / "policy" / "required-inputs.md").read_text(encoding="utf-8")
-        self.assertIn("built-in `grill-storm`", readme)
+        self.assertIn("first-party `skills/grill-storm`", readme)
         self.assertIn("tell Claude Code to use `claude-yolo-until-done` to execute approved plan", readme)
         self.assertIn("output folder", readme)
         self.assertIn("defaults to current working directory", readme)
@@ -202,14 +202,20 @@ class DocsAndTemplatesTest(unittest.TestCase):
         for relative in mutable_paths:
             self.assertFalse((SKILL_ROOT / relative).exists(), relative)
 
-    def test_grill_storm_runtime_is_project_owned(self) -> None:
+    def test_grill_storm_skill_is_project_owned(self) -> None:
+        grill_skill = (SKILL_ROOT / "skills" / "grill-storm" / "SKILL.md").read_text(encoding="utf-8")
         root_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         required_authoring = (SKILL_ROOT / "policy" / "required-authoring.md").read_text(encoding="utf-8")
 
+        self.assertIn("name: grill-storm", grill_skill)
+        self.assertIn("workflow/grill_storm_loop.py", grill_skill)
+        self.assertIn("workflow/validate_grill_docs.py", grill_skill)
+        self.assertIn("Muse", grill_skill)
+        self.assertIn("Logos", grill_skill)
+        self.assertIn("human-approved spec", grill_skill)
+        self.assertIn("human-approved plan", grill_skill)
         self.assertIn("workflow/grill_storm_loop.py", root_skill)
         self.assertIn("human_dialogue", root_skill)
-        self.assertIn("human-approved spec", root_skill)
-        self.assertIn("human-approved plan", root_skill)
         self.assertIn("docs mailbox", required_authoring)
 
     def test_hook_template_contains_only_lifecycle_groups(self) -> None:

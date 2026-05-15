@@ -1,12 +1,12 @@
 # Claude YOLO Until Done
 
-`claude-yolo-until-done` is a lightweight Claude Code workflow with built-in grill-storm authoring and worker+watcher execution.
+`claude-yolo-until-done` is a lightweight Claude Code workflow with first-party grill-storm authoring and worker+watcher execution.
 
-Project no longer depends on `superpowers` installation. Intended path is simple: use built-in `grill-storm` to converge on approved spec and plan first, then tell Claude Code to use `claude-yolo-until-done` to execute approved plan.
+Project no longer depends on `superpowers` installation. Intended path is simple: use first-party `skills/grill-storm` to converge on approved spec and plan first, then tell Claude Code to use `claude-yolo-until-done` to execute approved plan.
 
 Workflow has two phases:
 
-- planning: use two built-in agents to converge on `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md`
+- planning: use first-party `skills/grill-storm` plus Muse/Logos agents to converge on `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md`
 - execution: bootstrap run root with `state.json` and `trace.md`, then drive worker/watcher loop until cleanup is explicit
 
 For shortest operator path, see [QUICKSTART.md](QUICKSTART.md).
@@ -35,7 +35,7 @@ First-party planning bundle lives under `docs/` in target project:
 
 These 5 files are external brain. Agent talk should not rely only on chat history.
 
-Use built-in grill-storm authoring flow:
+Use first-party `skills/grill-storm` authoring flow:
 
 - combines `grill-me` style gap finding with brainstorming-style internal challenge before asking user
 - `Muse` reads `intent.md` and `open-questions.md`
@@ -82,7 +82,7 @@ Runtime status model is intentionally small:
 
 ## Preflight And Bootstrap
 
-Default new-run startup uses built-in grill-storm docs under `<project>/docs/`. Run `workflow/init_grill_docs.py` when those docs do not exist, iterate with `workflow/grill_storm.py --status` until `docs/spec.md` and `docs/plan.md` are approved, then run `workflow/preflight.py` without `--spec/--plan` to execute the default docs.
+Default new-run startup uses first-party grill-storm docs under `<project>/docs/`. Run `workflow/init_grill_docs.py` when those docs do not exist, iterate with `workflow/grill_storm_loop.py` until `docs/spec.md` and `docs/plan.md` are approved, then run `workflow/preflight.py` without `--spec/--plan` to execute the default docs.
 
 Existing approved spec/plan files are still supported by passing both `--spec` and `--plan`.
 

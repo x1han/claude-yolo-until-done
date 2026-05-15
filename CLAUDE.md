@@ -18,8 +18,8 @@ This file governs the inner software repository layer at `/datf/hanxi/software/c
 - Do not rely on ignored or untracked local workflow material inside this repository as shared execution state.
 
 ## Repository guidance
-- Keep shipped code, tracked tests, public operator docs, and shipped role definitions in this repository.
-- Store shipped role definitions under `agents/`; `.claude/` is for local Claude runtime state and ignored local skills.
+- Keep shipped code, tracked tests, public operator docs, first-party skills, and shipped role definitions in this repository.
+- Store first-party skills under `skills/` and shipped role definitions under `agents/`; `.claude/` is for local Claude runtime state and ignored external/local skills.
 - Keep implementation aligned with the fail-closed workflow model described by the skill, policy, and hook files.
 - Do not move durable plans, validation traces, generated grill-storm docs, or local-only notes into this repository; store them in `../workspace/` or the selected output folder.
 
