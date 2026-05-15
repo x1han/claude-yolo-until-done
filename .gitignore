@@ -5,3 +5,4 @@ __pycache__/
 .gitnexus
 AGENTS.md
 .claude/skills/
+.claude/agent-memory/

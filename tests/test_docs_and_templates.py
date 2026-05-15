@@ -11,24 +11,24 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 class DocsAndTemplatesTest(unittest.TestCase):
     def test_agent_role_files_define_minimal_constraints(self) -> None:
         cases = {
-            ".claude/agents/worker.md": [
+            "agents/worker.md": [
                 "supplied task packet",
                 "Do not give final approval.",
                 "execute the complete approved spec/plan",
                 "do not pre-plan future loop iterations",
             ],
-            ".claude/agents/helper.md": [
+            "agents/helper.md": [
                 "supplied task packet",
                 "Do not give final approval.",
             ],
-            ".claude/agents/watcher.md": [
+            "agents/watcher.md": [
                 "independent review",
                 "checklist",
                 "verification evidence",
                 "same complete approved spec/plan",
                 "preplanned loop slice",
             ],
-            ".claude/agents/muse.md": [
+            "agents/muse.md": [
                 "Muse",
                 "right-brain",
                 "1-3 adjacent but divergent possibilities",
@@ -39,7 +39,7 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "joint uncertainty",
                 "Do not write final spec or plan.",
             ],
-            ".claude/agents/logos.md": [
+            "agents/logos.md": [
                 "Logos",
                 "left-brain",
                 "logical spec/plan architect",
@@ -66,14 +66,8 @@ class DocsAndTemplatesTest(unittest.TestCase):
             for required in required_strings:
                 self.assertIn(required, body, f"{relative}: missing {required!r}")
 
-    def test_role_agent_project_memory_files_exist(self) -> None:
-        for role in ("muse", "logos", "worker", "watcher", "helper"):
-            memory = SKILL_ROOT / ".claude" / "agent-memory" / role / "MEMORY.md"
-            body = memory.read_text(encoding="utf-8")
-            self.assertIn(f"# {role} memory", body)
-            self.assertIn("## Role Conventions", body)
-            self.assertIn("## Project Conventions", body)
-            self.assertIn("## Reliable Verification", body)
+    def test_role_agent_project_memory_is_local_runtime_state(self) -> None:
+        self.assertFalse((SKILL_ROOT / ".claude" / "agent-memory").exists())
 
     def test_docs_describe_lightweight_runtime_only(self) -> None:
         legacy_terms = [
@@ -195,83 +189,23 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertNotIn("executing-plans", quickstart)
         self.assertNotIn("subagent-driven-development", quickstart)
 
-    def test_repo_includes_grill_storm_external_brain_docs(self) -> None:
-        cases = {
-            "docs/intent.md": [
-                "# Intent",
-                "## Primary Goal",
-                "## Non-Goals",
-                "## Constraints",
-                "## Preferences",
-            ],
-            "docs/open-questions.md": [
-                "# Open Questions",
-                "## High Priority",
-                "## Answered Recently",
-            ],
-            "docs/decisions.md": [
-                "# Decisions",
-                "## Decision Log",
-                "Status: accepted",
-                "Source: consensus",
-                "Source: spec-review",
-                "Source: plan-review",
-            ],
-            "docs/spec.md": [
-                "# Spec",
-                "## Problem",
-                "## Requirements",
-                "## Acceptance Criteria",
-            ],
-            "docs/plan.md": [
-                "# Plan",
-                "## Goal",
-                "## Steps",
-                "## Rollback / Safety",
-            ],
-        }
-        for relative, required_strings in cases.items():
-            body = (SKILL_ROOT / relative).read_text(encoding="utf-8")
-            for required in required_strings:
-                self.assertIn(required, body, f"{relative}: missing {required!r}")
+    def test_repo_keeps_mutable_planning_docs_out_of_shipped_tree(self) -> None:
+        mutable_paths = [
+            "docs/intent.md",
+            "docs/open-questions.md",
+            "docs/decisions.md",
+            "docs/spec.md",
+            "docs/plan.md",
+            "docs/superpowers/specs",
+            "docs/superpowers/plans",
+        ]
+        for relative in mutable_paths:
+            self.assertFalse((SKILL_ROOT / relative).exists(), relative)
 
-    def test_builtin_grill_storm_skill_describes_two_agent_internal_first_runtime(self) -> None:
-        skill_path = SKILL_ROOT / ".claude" / "skills" / "grill-storm" / "SKILL.md"
-        body = skill_path.read_text(encoding="utf-8")
-        self.assertIn("name: grill-storm", body)
-        self.assertIn("Muse and Logos do most discussion before the user sees anything", body)
-        self.assertIn("workflow/grill_storm.py", body)
-        self.assertIn("workflow/validate_grill_docs.py", body)
-        self.assertIn("Ask user only after both agents have recorded accepted internal rounds", body)
-        self.assertIn("does not launch agents by itself", body)
-        self.assertIn("dispatch or continue Muse or Logos", body)
-        self.assertIn("1-3 adjacent divergent expansions", body)
-        self.assertIn("2-3 approaches with tradeoffs and recommendation", body)
-        self.assertIn("docs/intent.md", body)
-        self.assertIn("docs/open-questions.md", body)
-        self.assertIn("docs/decisions.md", body)
-        self.assertIn("docs/spec.md", body)
-        self.assertIn("docs/plan.md", body)
-
-    def test_grill_storm_docs_describe_planning_loop_dispatch(self) -> None:
-        skill = (SKILL_ROOT / ".claude" / "skills" / "grill-storm" / "SKILL.md").read_text(encoding="utf-8")
+    def test_grill_storm_runtime_is_project_owned(self) -> None:
         root_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         required_authoring = (SKILL_ROOT / "policy" / "required-authoring.md").read_text(encoding="utf-8")
 
-        self.assertIn("workflow/grill_storm.py --status", skill)
-        self.assertIn("workflow/grill_storm_loop.py", skill)
-        self.assertIn("docs mailbox", skill)
-        self.assertIn("dispatch request", skill)
-        self.assertIn("agent_prompt", skill)
-        self.assertIn("Agent", skill)
-        self.assertIn("session_action", skill)
-        self.assertIn("persistent", skill.lower())
-        self.assertIn("human_dialogue", skill)
-        self.assertIn("consensus", skill)
-        self.assertIn("joint_uncertainty", skill)
-        self.assertIn("needs_spec_self_review", skill)
-        self.assertIn("human_spec_review", skill)
-        self.assertIn("human_plan_review", skill)
         self.assertIn("workflow/grill_storm_loop.py", root_skill)
         self.assertIn("human_dialogue", root_skill)
         self.assertIn("human-approved spec", root_skill)
