@@ -51,10 +51,17 @@ class GrillStormLoopTest(unittest.TestCase):
             self.assertIn("agent_prompt", dispatch)
             self.assertIn("Muse", dispatch["agent_prompt"])
             self.assertEqual(dispatch["session_action"], "create")
-            self.assertTrue(dispatch["agent_id"].startswith("muse-1-"))
+            self.assertEqual(dispatch["dispatch_action"], "create")
+            self.assertEqual(dispatch["continuity_model"], "project_memory")
+            self.assertTrue(dispatch["role_invocation_id"].startswith("muse-1-"))
+            self.assertEqual(dispatch["last_runtime_agent_id"], "")
             self.assertEqual(dispatch["agent_generation"], 1)
-            self.assertEqual(dispatch["agent_runtime"]["action"], "create")
-            self.assertEqual(dispatch["agent_runtime"]["agent_id"], dispatch["agent_id"])
+            self.assertEqual(dispatch["memory"]["scope"], "project")
+            self.assertEqual(dispatch["memory"]["path"], ".claude/agent-memory/muse/MEMORY.md")
+            self.assertEqual(dispatch["role_log"], "agents/muse-log.md")
+            memory_path = project_dir / ".claude" / "agent-memory" / "muse" / "MEMORY.md"
+            self.assertTrue(memory_path.exists())
+            self.assertIn("# muse memory", memory_path.read_text(encoding="utf-8"))
 
     def test_persistent_session_reused_across_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -64,7 +71,7 @@ class GrillStormLoopTest(unittest.TestCase):
 
             dispatch1 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
             self.assertEqual(dispatch1["session_action"], "create")
-            agent_id_1 = dispatch1["agent_id"]
+            role_invocation_id_1 = dispatch1["role_invocation_id"]
 
             from grill_storm_loop import record_round_result
             record_round_result(
@@ -87,22 +94,24 @@ class GrillStormLoopTest(unittest.TestCase):
             dispatch2 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
             self.assertEqual(dispatch2["role"], "logos")
             self.assertEqual(dispatch2["session_action"], "create")
+            self.assertEqual(dispatch2["dispatch_action"], "create")
+            self.assertEqual(dispatch2["continuity_model"], "project_memory")
             self.assertIn("Logos", dispatch2["agent_prompt"])
 
             sessions = load_agent_sessions(run_root)
-            self.assertEqual(sessions["roles"]["muse"]["agent_id"], agent_id_1)
+            self.assertEqual(sessions["roles"]["muse"]["role_invocation_id"], role_invocation_id_1)
             self.assertEqual(sessions["roles"]["muse"]["generation"], 1)
             self.assertEqual(sessions["roles"]["muse"]["status"], "active")
             self.assertEqual(sessions["roles"]["logos"]["generation"], 1)
             self.assertEqual(sessions["roles"]["logos"]["status"], "active")
 
-    def test_planning_dispatch_reuse_instructs_exact_agent_id_resume(self) -> None:
+    def test_planning_dispatch_reuses_project_memory_continuity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             self.write_docs(project_dir)
             run_root = project_dir / ".yolo"
             first = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
-            agent_id = first["agent_id"]
+            role_invocation_id = first["role_invocation_id"]
 
             dispatch = build_dispatch_request(
                 project_dir,
@@ -118,13 +127,16 @@ class GrillStormLoopTest(unittest.TestCase):
                 round_number=2,
             )
 
-            self.assertEqual(dispatch["session_action"], "reuse")
-            self.assertEqual(dispatch["agent_id"], agent_id)
-            self.assertEqual(dispatch["agent_runtime"]["action"], "resume_by_agent_id")
-            self.assertEqual(dispatch["agent_runtime"]["agent_id"], agent_id)
-            self.assertTrue(dispatch["agent_runtime"]["must_resume_exact_agent_id"])
-            self.assertIn(agent_id, dispatch["agent_prompt"])
-            self.assertIn("Do not create a fresh muse agent", dispatch["agent_prompt"])
+            self.assertEqual(dispatch["session_action"], "create")
+            self.assertEqual(dispatch["dispatch_action"], "create")
+            self.assertEqual(dispatch["continuity_model"], "project_memory")
+            self.assertEqual(dispatch["role_invocation_id"], role_invocation_id)
+            self.assertEqual(dispatch["last_runtime_agent_id"], "")
+            self.assertEqual(dispatch["memory"]["path"], ".claude/agent-memory/muse/MEMORY.md")
+            self.assertEqual(dispatch["role_log"], "agents/muse-log.md")
+            self.assertIn(role_invocation_id, dispatch["agent_prompt"])
+            self.assertIn("project memory", dispatch["agent_prompt"])
+            self.assertIn("role log", dispatch["agent_prompt"])
 
     def test_build_dispatch_request_rejects_unknown_actor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

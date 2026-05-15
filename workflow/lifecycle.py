@@ -67,6 +67,9 @@ def build_cleanup_ready_state_snapshot(state: dict, *, schema_version: int = 2) 
                 "loop_stop_on_convergence": loop.get("stop_on_convergence"),
                 "loop_converged": loop.get("converged"),
                 "loop_stop_reason": loop.get("stop_reason", ""),
+                "loop_iteration_evidence": list(loop.get("iteration_evidence", [])),
+                "loop_latest_iteration_evidence": dict(loop.get("latest_iteration_evidence", {})) if isinstance(loop.get("latest_iteration_evidence"), dict) else {},
+                "loop_acceleration_review": dict(loop.get("acceleration_review", {})) if isinstance(loop.get("acceleration_review"), dict) else {},
             }
         )
     return snapshot

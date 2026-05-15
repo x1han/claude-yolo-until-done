@@ -27,6 +27,156 @@ class ValidatorsTest(unittest.TestCase):
             "certification_hash": compute_certification_hash(payload),
         }
 
+    def loop_submission_state(self) -> dict:
+        return {
+            "goal": "Fix it.",
+            "success_criteria": ["It works."],
+            "status": "needs_review",
+            "task_id": "task-001",
+            "task_title": "Fix parser handling",
+            "task_inputs": {"task_id": "task-001", "task_title": "Fix parser handling"},
+            "worker_claim": "Added structured loop evidence.",
+            "files_changed": ["workflow/controller.py"],
+            "verification_command": "python -m unittest tests.test_validators",
+            "verification_result": "passed",
+            "submitted_at": "2026-05-01T00:00:00Z",
+            "review": {},
+            "reviewed_at": "",
+            "owner": "watcher",
+            "next_action": "watcher_review",
+            "cleanup_required": False,
+            "requested_role": "watcher",
+            "dispatch_status": "claimed",
+            "last_dispatch": {"role": "watcher", "task_id": "task-001"},
+            "mode": "loop",
+            "loop": {
+                "enabled": True,
+                "iteration": 2,
+                "max_iterations": 5,
+                "stop_on_convergence": True,
+                "converged": False,
+                "stop_reason": "",
+                "iteration_evidence": [],
+                "latest_iteration_evidence": {
+                    "iteration": 2,
+                    "selected_work": "structured loop evidence",
+                    "worker_claim": "Added structured loop evidence.",
+                    "files_changed": ["workflow/controller.py"],
+                    "verification_command": "python -m unittest tests.test_validators",
+                    "verification_result": "passed",
+                    "evidence": ["validator regression passed"],
+                },
+                "acceleration_review": {
+                    "iteration": 2,
+                    "decision": "defer",
+                    "evidence": ["no safe acceleration found in this slice"],
+                    "gate_safety_basis": ["submission validator still runs", "watcher review still required"],
+                },
+            },
+            "plan_path": "docs/plan.md",
+            "spec_path": "docs/spec.md",
+            "updated_at": "2026-05-01T00:00:00Z",
+        }
+
+    def test_submission_validator_requires_loop_iteration_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = self.loop_submission_state()
+            state["loop"]["latest_iteration_evidence"] = {}
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+            report = validate_submission(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("loop_latest_iteration_evidence_present", {item["name"] for item in report["failures"]})
+
+    def test_submission_validator_requires_loop_acceleration_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = self.loop_submission_state()
+            state["loop"]["acceleration_review"] = {}
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+            report = validate_submission(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("loop_acceleration_review_present", {item["name"] for item in report["failures"]})
+
+    def test_submission_validator_rejects_blank_loop_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = self.loop_submission_state()
+            state["loop"]["latest_iteration_evidence"]["evidence"] = [""]
+            state["loop"]["acceleration_review"]["gate_safety_basis"] = [" "]
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+            report = validate_submission(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("loop_latest_evidence_present", {item["name"] for item in report["failures"]})
+            self.assertIn("loop_gate_safety_basis_present", {item["name"] for item in report["failures"]})
+
+    def test_submission_validator_accepts_structured_loop_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "state.json").write_text(json.dumps(self.loop_submission_state()), encoding="utf-8")
+
+            report = validate_submission(run_root)
+
+            self.assertTrue(report["passed"])
+
+    def test_completion_validator_rejects_loop_evidence_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = self.loop_submission_state()
+            state["status"] = "ready_for_cleanup"
+            state["owner"] = "watcher"
+            state["next_action"] = "complete"
+            state["cleanup_required"] = True
+            state["review"] = {
+                "verdict": "approve",
+                "scope_checked": ["workflow/controller.py"],
+                "problems": [],
+                "required_rework": [],
+                "acceptance_basis": ["structured loop evidence verified"],
+            }
+            state["reviewed_at"] = "2026-05-01T00:01:00Z"
+            state["loop"]["acceleration_review"]["review_verdict"] = "approve"
+            state["loop"]["acceleration_review"]["reviewed_by_watcher"] = True
+            state["loop"]["acceleration_review"]["reviewed_at"] = "2026-05-01T00:01:00Z"
+            state.update(self.completion_certification(state))
+            state["loop"]["latest_iteration_evidence"]["selected_work"] = "tampered"
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+            report = validate_completion(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("completion_certification_cleanup_ready_state_hash_matches", {item["name"] for item in report["failures"]})
+
+    def test_completion_validator_requires_watcher_reviewed_acceleration_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            state = self.loop_submission_state()
+            state["status"] = "ready_for_cleanup"
+            state["owner"] = "watcher"
+            state["next_action"] = "complete"
+            state["cleanup_required"] = True
+            state["review"] = {
+                "verdict": "approve",
+                "scope_checked": ["workflow/controller.py"],
+                "problems": [],
+                "required_rework": [],
+                "acceptance_basis": ["structured loop evidence verified"],
+            }
+            state["reviewed_at"] = "2026-05-01T00:01:00Z"
+            state.update(self.completion_certification(state))
+            (run_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+            report = validate_completion(run_root)
+
+            self.assertFalse(report["passed"])
+            self.assertIn("loop_acceleration_reviewed_by_watcher", {item["name"] for item in report["failures"]})
+
     def test_submission_validator_rejects_missing_worker_claim(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)

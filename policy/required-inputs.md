@@ -12,7 +12,7 @@ A new run requires all of following:
 
 In this branch, preflight should bootstrap run root before ordinary execution continues.
 
-Default execution mode is acyclic. To repeat the same approved plan, choose loop mode at startup with `--mode loop` and at least one stop policy: `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. A+B uses either stop condition.
+Default execution mode is acyclic. To repeat the same approved plan, choose loop mode at startup with `--mode loop` and at least one stop policy: `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. Loop mode: repeat the same complete approved spec/plan; fixed loop N means N complete acyclic executions, convergence-only loop uses default max 10, and agents must not pre-plan future loop iterations. A+B uses either stop condition.
 
 ## Continue run
 

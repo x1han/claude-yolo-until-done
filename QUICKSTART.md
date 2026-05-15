@@ -37,7 +37,9 @@ python <skill-repo>/workflow/preflight.py \
   --success-criterion "Workflow reaches valid completion."
 ```
 
-Default is acyclic mode. For loop mode, preflight with a stop policy:
+Default is acyclic mode: execute the approved spec/plan once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit. fixed loop N means N complete acyclic executions; convergence-only loop uses default max 10. do not pre-plan future loop iterations.
+
+For loop mode, preflight with a stop policy:
 
 ```bash
 python <skill-repo>/workflow/preflight.py \
@@ -102,14 +104,14 @@ Keep session aligned with durable run state:
 Useful commands:
 
 ```bash
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor worker --action submit ...
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor watcher --action review ...
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor watcher --action complete
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode pause
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode cancel
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode complete
-python <skill-repo>/hooks/run_gate.py --validator submission --run-root <output-folder>/.yolo
-python <skill-repo>/hooks/run_gate.py --validator completion --run-root <output-folder>/.yolo
+python <skill-repo>/workflow/operator_cli.py worker-submit --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py watcher-review --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py watcher-complete --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode pause
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode cancel
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode complete
+python <skill-repo>/workflow/operator_cli.py validate-submission --run-root <output-folder>/.yolo
+python <skill-repo>/workflow/operator_cli.py validate-completion --run-root <output-folder>/.yolo
 ```
 
 ## 8. Let Hooks Guard Session

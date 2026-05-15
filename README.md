@@ -102,7 +102,9 @@ That creates:
 - `<run-root>/state.json`
 - `<run-root>/trace.md`
 
-Default execution mode is acyclic: one approved plan run reaches cleanup. Loop mode repeats the same acyclic core until one stop policy fires:
+Default execution mode is acyclic: one approved spec/plan run reaches cleanup. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit until one stop policy fires. fixed loop N means N complete acyclic executions. Convergence-only loops use default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations.
+
+Loop mode repeats the same acyclic core until one stop policy fires:
 
 ```bash
 python <skill-repo>/workflow/preflight.py \
@@ -138,41 +140,46 @@ Do not use headless `claude -p` print mode for claude-yolo runs. In print mode, 
 
 Then tell Claude Code to use `claude-yolo-until-done` to execute approved plan, optionally naming plan path and output folder if you are not using defaults.
 
-Main commands are:
+Main operator commands are:
 
 ```bash
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor worker --action submit ...
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor watcher --action review ...
-python <skill-repo>/workflow/controller.py --run-root <output-folder>/.yolo --actor watcher --action complete
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode pause
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode cancel
-python <skill-repo>/workflow/cleanup_claude_yolo.py --project-dir <output-folder> --run-root .yolo --mode complete
-python <skill-repo>/hooks/run_gate.py --validator submission --run-root <output-folder>/.yolo
-python <skill-repo>/hooks/run_gate.py --validator completion --run-root <output-folder>/.yolo
+python <skill-repo>/workflow/operator_cli.py worker-submit --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py watcher-review --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py watcher-complete --run-root <output-folder>/.yolo ...
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode pause
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode cancel
+python <skill-repo>/workflow/operator_cli.py cleanup --project-dir <output-folder> --run-root .yolo --mode complete
+python <skill-repo>/workflow/operator_cli.py validate-submission --run-root <output-folder>/.yolo
+python <skill-repo>/workflow/operator_cli.py validate-completion --run-root <output-folder>/.yolo
 ```
+
+`worker-submit`, `watcher-review`, and `watcher-complete` supply the controller actor/action values. Operators pass only run evidence and version arguments.
 
 ## Persistent Role Agents
 
-Role agents are scoped per `.yolo/` run. Each role should be created once per run and then continued for later dispatches to that same role.
+Role agents are scoped per `.yolo/` run. Each dispatch creates a fresh Agent subagent for that turn instead of resuming hidden live chat state.
 
 `agent_sessions.json` stores routing metadata only. It does not replace `state.json` and does not decide workflow status.
 
-Dispatch payloads include `session_action`, `agent_id`, and runtime routing metadata. `session_action: create` means create the role agent once for that generation. `session_action: reuse` means resume/send to exactly that existing `agent_id`; do not create a fresh role agent with new context. Replacement is explicit only and creates a new generation through the replacement flow.
+Role-agent sessions are per `.yolo/` run. `agent_sessions.json` is routing metadata, not workflow authority; `state.json` remains authoritative. Each role entry records `role_invocation_id` for stable role/generation audit identity, `last_runtime_agent_id` for audit trail, `continuity_model: project_memory`, and durable paths for project memory, role log, and role summary. `session_action=create` means create fresh Agent subagent for that turn. Continuity comes from project memory, role log, role summary, and shared docs/state, not exact live runtime-agent reuse. Replacement is explicit only and creates a new generation.
 
 ```json
 {
-  "session_action": "reuse",
-  "agent_id": "logos-1-example",
-  "agent_runtime": {
-    "tool": "Agent",
-    "action": "resume_by_agent_id",
-    "agent_id": "logos-1-example",
-    "must_resume_exact_agent_id": true
-  }
+  "session_action": "create",
+  "continuity_model": "project_memory",
+  "role_invocation_id": "logos-1-example",
+  "last_runtime_agent_id": "",
+  "memory": {
+    "scope": "project",
+    "path": ".claude/agent-memory/logos/MEMORY.md",
+    "required": true
+  },
+  "role_log": "agents/logos-log.md",
+  "summary_path": "agents/logos-summary.md"
 }
 ```
 
-Each role keeps a role lab notebook at `agents/<role>-log.md`. Entries are concise experimental records: hypothesis, actions, observations, result, next. Summaries are compression cache only; the notebook is primary durable context.
+Each role keeps a role lab notebook at `agents/<role>-log.md`. Entries are concise experimental records: hypothesis, actions, observations, result, next. Each role also keeps project memory at `.claude/agent-memory/<role>/MEMORY.md`. Summaries are compression cache only; project memory plus role notebook are primary durable context.
 
 ## Hook Model
 
@@ -201,10 +208,10 @@ Controller also marks `cleanup_required` at completion so run cannot silently dr
 
 ## Manual Cleanup
 
-If you need to detach claude-yolo manually, use shared cleanup script:
+If you need to detach claude-yolo manually, use the operator cleanup command:
 
 ```bash
-python <skill-repo>/workflow/cleanup_claude_yolo.py \
+python <skill-repo>/workflow/operator_cli.py cleanup \
   --project-dir <output-folder> \
   --run-root .yolo \
   --mode pause

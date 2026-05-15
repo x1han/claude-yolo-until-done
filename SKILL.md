@@ -34,7 +34,7 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 ## Startup Contract
 - Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
 - Planning loop command: use `workflow/grill_storm_loop.py next --project-dir <output-folder> --run-root <output-folder>/.yolo` to get either a terminal planning status or a structured `dispatch_required` payload.
-- When `dispatch_required` is returned, follow its role session routing: `session_action: create` creates the requested `Muse` or `Logos` agent once; `session_action: reuse` must resume/send to exactly the provided `agent_id` and must not create a fresh role agent. Then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
+- When `dispatch_required` is returned, follow its role session routing: `session_action: create` means create fresh Agent subagent for that turn using emitted prompt and durable context files. Do not assume hidden live session reuse. Then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
 - `Muse` and `Logos` communicate through the docs mailbox and role summaries, not hidden chat-only state.
 - Planning loop: `Muse` and `Logos` should update at least one planning doc every round, record stable conclusions in `decisions.md`, and return `human_dialogue` for consensus or joint uncertainty.
 - human-approved spec and human-approved plan are required: record `Source: spec-review` before plan authoring and `Source: plan-review` before execution.
@@ -95,13 +95,13 @@ Worker may submit only with fresh verification evidence.
 
 Watcher must review before completion and must record structured review payload.
 
-Default mode is acyclic. Loop mode is selected only at preflight/bootstrap with `--mode loop` plus `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. A+B uses either stop condition, and continue-run must fail closed on mode/config drift.
+Default mode is acyclic: execute the complete approved spec/plan once. Loop mode is selected only at preflight/bootstrap with `--mode loop` plus `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations. A+B uses either stop condition, and continue-run must fail closed on mode/config drift.
 
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 
-Role agent sessions are per `.yolo/` run. Reuse the same role agent for later dispatches to that role when possible.
+Role agent sessions are per `.yolo/` run. Keep stable role identity and durable artifacts across turns, but create fresh Agent subagent for each dispatch.
 
-Each role dispatch carries `agent_id` routing metadata. `create` means create the role agent once for that generation. `reuse` means resume/send to exactly that stored `agent_id`; do not create a fresh role agent with new context. Replacement is explicit only and creates a new generation through replacement flow.
+Each role dispatch carries routing metadata. `create` means create fresh Agent subagent for that turn. `role_invocation_id` is stable role/generation audit identity, `last_runtime_agent_id` is audit-only, and `continuity_model` is `project_memory`. Continuity comes from project memory, role log, role summary, and shared docs/state; do not rely on exact runtime-agent reuse. Replacement is explicit only and creates a new generation through replacement flow.
 
 `agent_sessions.json` stores role-agent routing metadata. It is not workflow authority. `state.json` remains authoritative.
 

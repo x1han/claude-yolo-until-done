@@ -197,6 +197,48 @@ class OrchestratorRoutingTest(unittest.TestCase):
         self.assertEqual(packet["gate_attempt"], 1)
         self.assertEqual(packet["task_handoff_notes"], ["watcher requested tighter stop semantics"])
 
+    def test_build_task_packet_describes_loop_as_repeated_whole_plan_unit(self) -> None:
+        plan_body = "# Plan\n\n### Task 1: First section\n\n### Task 2: Second section"
+        state = {
+            "mode": "loop",
+            "loop": {
+                "enabled": True,
+                "iteration": 2,
+                "max_iterations": 5,
+                "stop_on_convergence": True,
+                "converged": False,
+            },
+            "task_id": "task-001",
+            "task_title": "Execute approved spec and plan",
+            "task_goal": "Repeat approved plan.",
+            "task_scope": [],
+            "task_inputs": {
+                "task_id": "task-001",
+                "task_title": "Execute approved spec and plan",
+                "plan_task_text": plan_body,
+                "spec_excerpt": "# Spec\nDo the work.",
+                "checklist_items": ["execute complete approved spec and plan"],
+                "plan_sections": [
+                    {"task_id": "plan-section-001", "task_title": "First section", "plan_task_text": "### Task 1: First section"},
+                    {"task_id": "plan-section-002", "task_title": "Second section", "plan_task_text": "### Task 2: Second section"},
+                ],
+            },
+            "task_handoff_notes": [],
+            "gate_id": "gate-task-001",
+            "gate_attempt": 0,
+            "gate_max_attempts": 5,
+        }
+
+        packet = build_task_packet(state, role="worker")
+
+        self.assertEqual(packet["plan_task_text"], plan_body)
+        self.assertIn("### Task 2: Second section", packet["plan_task_text"])
+        self.assertEqual(packet["loop_contract"]["iteration"], 2)
+        self.assertEqual(packet["loop_contract"]["max_iterations"], 5)
+        self.assertTrue(packet["loop_contract"]["stop_on_convergence"])
+        self.assertIn("execute the complete approved spec/plan", packet["loop_contract"]["instruction"])
+        self.assertIn("do not pre-plan future loop iterations", packet["loop_contract"]["instruction"])
+
     def test_build_task_packet_preserves_handoff_context(self) -> None:
         state = {
             "task_id": "task-002",
@@ -657,10 +699,12 @@ class OrchestratorRoutingTest(unittest.TestCase):
             self.assertEqual(result["agent_session"]["role"], "worker")
             self.assertEqual(result["agent_session"]["action"], "create")
             self.assertEqual(result["agent_session"]["generation"], 1)
-            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
-            self.assertEqual(result["agent_session"]["runtime"]["agent_id"], result["agent_session"]["agent_id"])
+            self.assertTrue(result["agent_session"]["role_invocation_id"].startswith("worker-1-"))
+            self.assertEqual(result["agent_session"]["last_runtime_agent_id"], "")
+            self.assertEqual(result["agent_session"]["continuity_model"], "project_memory")
+            self.assertEqual(result["agent_session"]["memory_path"], ".claude/agent-memory/worker/MEMORY.md")
             registry = load_agent_sessions(run_root)
-            self.assertEqual(registry["roles"]["worker"]["agent_id"], result["agent_session"]["agent_id"])
+            self.assertEqual(registry["roles"]["worker"]["role_invocation_id"], result["agent_session"]["role_invocation_id"])
 
     def test_orchestrate_reuses_worker_agent_session_on_replayed_role(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -702,11 +746,10 @@ class OrchestratorRoutingTest(unittest.TestCase):
 
             second = orchestrate(run_root, next_state)
 
-            self.assertEqual(second["agent_session"]["action"], "reuse")
-            self.assertEqual(second["agent_session"]["agent_id"], first["agent_session"]["agent_id"])
-            self.assertEqual(second["agent_session"]["runtime"]["action"], "resume_by_agent_id")
-            self.assertEqual(second["agent_session"]["runtime"]["agent_id"], first["agent_session"]["agent_id"])
-            self.assertTrue(second["agent_session"]["runtime"]["must_resume_exact_agent_id"])
+            self.assertEqual(second["agent_session"]["action"], "create")
+            self.assertEqual(second["agent_session"]["role_invocation_id"], first["agent_session"]["role_invocation_id"])
+            self.assertEqual(second["agent_session"]["last_runtime_agent_id"], "")
+            self.assertEqual(second["agent_session"]["continuity_model"], "project_memory")
 
     def test_orchestrate_enriches_legacy_replayed_dispatch_with_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -753,8 +796,8 @@ class OrchestratorRoutingTest(unittest.TestCase):
             persisted = load_state(run_root)
 
             self.assertEqual(result["agent_session"]["action"], "create")
-            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
-            self.assertEqual(persisted["last_dispatch"]["agent_session"]["agent_id"], result["agent_session"]["agent_id"])
+            self.assertEqual(result["agent_session"]["continuity_model"], "project_memory")
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["role_invocation_id"], result["agent_session"]["role_invocation_id"])
 
     def test_orchestrate_enriches_rebuilt_live_claim_dispatch_with_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -795,8 +838,9 @@ class OrchestratorRoutingTest(unittest.TestCase):
             self.assertEqual(result["result"], "dispatched")
             self.assertTrue(result["replayed"])
             self.assertEqual(result["agent_session"]["role"], "worker")
-            self.assertEqual(result["agent_session"]["runtime"]["action"], "create")
-            self.assertEqual(persisted["last_dispatch"]["agent_session"]["runtime"]["agent_id"], result["agent_session"]["agent_id"])
+            self.assertEqual(result["agent_session"]["continuity_model"], "project_memory")
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["role_invocation_id"], result["agent_session"]["role_invocation_id"])
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["last_runtime_agent_id"], "")
 
     def test_orchestrate_normalizes_partial_replayed_agent_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -829,7 +873,7 @@ class OrchestratorRoutingTest(unittest.TestCase):
                     "next_action": "review",
                     "dispatched_at": "2026-05-11T00:00:00+00:00",
                     "task_packet": {"role": "watcher"},
-                    "agent_session": {"role": "watcher", "action": "reuse", "agent_id": "watcher-1-existing", "generation": 1},
+                    "agent_session": {"role": "watcher", "action": "reuse", "role_session_id": "watcher-1-existing", "runtime_agent_id": "actual-runtime-watcher-123", "generation": 1},
                 },
                 "worker_request": "",
                 "worker_question": "",
@@ -844,9 +888,11 @@ class OrchestratorRoutingTest(unittest.TestCase):
             result = orchestrate(run_root, state, consumer_id="watcher:gate-task-001:1")
             persisted = load_state(run_root)
 
-            self.assertEqual(result["agent_session"]["runtime"]["action"], "resume_by_agent_id")
-            self.assertEqual(result["agent_session"]["runtime"]["agent_id"], "watcher-1-existing")
-            self.assertTrue(persisted["last_dispatch"]["agent_session"]["runtime"]["must_resume_exact_agent_id"])
+            self.assertEqual(result["agent_session"]["action"], "reuse")
+            self.assertEqual(result["agent_session"]["continuity_model"], "project_memory")
+            self.assertEqual(result["agent_session"]["role_invocation_id"], "watcher-1-existing")
+            self.assertEqual(result["agent_session"]["last_runtime_agent_id"], "actual-runtime-watcher-123")
+            self.assertEqual(persisted["last_dispatch"]["agent_session"]["continuity_model"], "project_memory")
 
     def test_orchestrate_noops_after_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

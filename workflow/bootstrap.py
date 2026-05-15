@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from agent_sessions import ensure_agent_session_files
+from agent_sessions import ensure_agent_session_files, ensure_project_role_memory_files
 from checklist import build_master_checklist
 from state import build_state, build_trace, sync_current_task_view, write_json, write_text
 
@@ -35,6 +35,7 @@ def bootstrap_run(
     mode: str = "acyclic",
     loop_max_iterations: int | None = None,
     loop_stop_on_convergence: bool = False,
+    dialogue_language: dict | None = None,
 ) -> dict:
     fail_if_unsupported_headless_mode()
 
@@ -54,13 +55,14 @@ def bootstrap_run(
         mode=mode,
         loop_max_iterations=loop_max_iterations,
         loop_stop_on_convergence=loop_stop_on_convergence,
+        dialogue_language=dialogue_language,
     )
     if allow_need_human is False:
         state["allow_need_human"] = False
     checklist = build_master_checklist(spec_path, plan_path)
-    first_task = checklist["tasks"][0]
-    state["task_title"] = first_task["task_title"]
-    state["task_inputs"] = dict(first_task)
+    execution_unit = checklist["tasks"][0]
+    state["task_title"] = execution_unit["task_title"]
+    state["task_inputs"] = dict(execution_unit)
     sync_current_task_view(state)
     trace = build_trace(
         TEMPLATES_DIR / "trace-template.md",
@@ -75,6 +77,7 @@ def bootstrap_run(
     write_text(trace_path, trace)
     write_json(checklist_path, checklist)
     ensure_agent_session_files(resolved_run_root)
+    ensure_project_role_memory_files(repo_root.resolve())
 
     return {
         "run_root": str(resolved_run_root),

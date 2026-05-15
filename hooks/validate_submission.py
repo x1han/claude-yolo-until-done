@@ -8,13 +8,24 @@ WORKFLOW_DIR = HOOKS_DIR.parent / "workflow"
 if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
-from common import add_check, base_report, load_state, validate_required_state_fields
+from common import add_check, base_report, load_state, validate_loop_evidence_base, validate_required_state_fields
 from orchestrator import LIVE_CLAIM_STATUSES
 
 
 REQUIRED_REVIEW_STATUS = "needs_review"
 REQUIRED_OWNER = "watcher"
 REQUIRED_NEXT_ACTION = "watcher_review"
+
+
+def validate_loop_submission_evidence(report: dict, state: dict) -> None:
+    loop_evidence = validate_loop_evidence_base(report, state)
+    if loop_evidence is None:
+        return
+
+    latest, _acceleration = loop_evidence
+    add_check(report, "loop_latest_selected_work_present", bool(str(latest.get("selected_work", "")).strip()), f"latest_iteration_evidence={latest}")
+    add_check(report, "loop_latest_verification_command_matches", latest.get("verification_command") == state.get("verification_command"), f"latest={latest}")
+    add_check(report, "loop_latest_verification_result_matches", latest.get("verification_result") == state.get("verification_result"), f"latest={latest}")
 
 
 def run(run_root):
@@ -33,6 +44,7 @@ def run(run_root):
     add_check(report, "submitted_at_present", bool(str(state.get("submitted_at", "")).strip()), f"submitted_at={state.get('submitted_at')}")
     add_check(report, "review_is_empty", state.get("review") == {}, f"review={state.get('review')}")
     add_check(report, "reviewed_at_is_empty", not str(state.get("reviewed_at", "")).strip(), f"reviewed_at={state.get('reviewed_at')}")
+    validate_loop_submission_evidence(report, state)
     add_check(
         report,
         "dispatch_matches_review_target",

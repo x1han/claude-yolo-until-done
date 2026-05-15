@@ -15,7 +15,12 @@ _TASK_SECTION_PATTERN = re.compile(
 
 
 def extract_plan_tasks(plan_path: Path) -> list[tuple[str, str]]:
-    lines = plan_path.read_text(encoding="utf-8").splitlines()
+    plan_text = plan_path.read_text(encoding="utf-8")
+    return extract_plan_tasks_from_text(plan_text, plan_path)
+
+
+def extract_plan_tasks_from_text(plan_text: str, plan_path: Path) -> list[tuple[str, str]]:
+    lines = plan_text.splitlines()
     heading_tasks: list[tuple[str, str]] = []
     for line in lines:
         stripped = line.strip()
@@ -46,25 +51,46 @@ def extract_plan_tasks(plan_path: Path) -> list[tuple[str, str]]:
     raise SystemExit(f"Could not extract any tasks from plan: {plan_path}")
 
 
-def build_master_checklist(spec_path: Path, plan_path: Path) -> dict:
-    spec_excerpt = spec_path.read_text(encoding="utf-8").strip()
-    plan_tasks = extract_plan_tasks(plan_path)
-
+def build_execution_unit(spec_text: str, plan_text: str) -> dict:
     return {
-        "tasks": [
-            {
-                "task_id": f"task-{index:03d}",
-                "task_title": task_title,
-                "plan_task_text": plan_task_text,
-                "spec_excerpt": spec_excerpt,
-                "checklist_items": [
-                    "match scope",
-                    "require fresh verification",
-                    "reject drift",
-                ],
-            }
-            for index, (plan_task_text, task_title) in enumerate(plan_tasks, start=1)
-        ]
+        "task_id": "task-001",
+        "task_title": "Execute approved spec and plan",
+        "plan_task_text": plan_text.strip(),
+        "spec_excerpt": spec_text.strip(),
+        "checklist_items": [
+            "execute complete approved spec and plan",
+            "require fresh verification",
+            "reject drift",
+        ],
+    }
+
+
+def build_plan_sections(plan_text: str, plan_path: Path) -> list[dict]:
+    try:
+        plan_tasks = extract_plan_tasks_from_text(plan_text, plan_path)
+    except SystemExit:
+        return []
+    return [
+        {
+            "task_id": f"plan-section-{index:03d}",
+            "task_title": task_title,
+            "plan_task_text": plan_task_text,
+        }
+        for index, (plan_task_text, task_title) in enumerate(plan_tasks, start=1)
+    ]
+
+
+def build_master_checklist(spec_path: Path, plan_path: Path) -> dict:
+    spec_text = spec_path.read_text(encoding="utf-8")
+    plan_text = plan_path.read_text(encoding="utf-8")
+    execution_unit = build_execution_unit(spec_text, plan_text)
+    plan_sections = build_plan_sections(plan_text, plan_path)
+    if plan_sections:
+        execution_unit = dict(execution_unit)
+        execution_unit["plan_sections"] = plan_sections
+    return {
+        "tasks": [execution_unit],
+        "plan_sections": plan_sections,
     }
 
 
@@ -77,4 +103,5 @@ def build_checklist_from_state(state: dict) -> dict:
     return {
         "current_task": current_task,
         "tasks": [task_inputs],
+        "plan_sections": list(task_inputs.get("plan_sections", [])) if isinstance(task_inputs.get("plan_sections"), list) else [],
     }

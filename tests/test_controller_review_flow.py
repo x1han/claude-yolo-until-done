@@ -43,6 +43,16 @@ class ControllerReviewFlowTest(unittest.TestCase):
             "python -m unittest tests.test_controller_review_flow",
             "--verification-result",
             "pass",
+            "--loop-selected-work",
+            "controller loop transition",
+            "--loop-evidence",
+            "controller flow test passed",
+            "--acceleration-decision",
+            "defer",
+            "--acceleration-evidence",
+            "no safe shortcut found",
+            "--gate-safety-basis",
+            "watcher approval still required",
         ]
         if converged:
             submit_command.append("--loop-converged")
@@ -106,7 +116,10 @@ class ControllerReviewFlowTest(unittest.TestCase):
         spec_path = project_dir / "spec.md"
         plan_path = project_dir / "plan.md"
         spec_path.write_text("# Spec\nLoop mode repeats the approved plan until stop policy fires.\n", encoding="utf-8")
-        plan_path.write_text("# Plan\n## Tasks\n1. Complete one acyclic iteration.\n", encoding="utf-8")
+        plan_path.write_text(
+            "# Plan\n## Tasks\n1. Complete one acyclic iteration.\n2. Verify the same complete unit.\n",
+            encoding="utf-8",
+        )
         command = [
             sys.executable,
             str(BOOTSTRAP_PATH),
@@ -137,6 +150,10 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.bootstrap_loop_run(project_dir, run_root, max_iterations=2)
 
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            original_task_inputs = dict(state["task_inputs"])
+            self.assertEqual(state["task_title"], "Execute approved spec and plan")
+            self.assertIn("1. Complete one acyclic iteration.", state["task_inputs"]["plan_task_text"])
+            self.assertIn("2. Verify the same complete unit.", state["task_inputs"]["plan_task_text"])
             state["gate_attempt"] = 4
             (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
@@ -152,20 +169,29 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["dispatch_status"], "running")
             self.assertEqual(state["dispatch_claim"]["owner"], "worker:gate-task-001:3")
             self.assertEqual(state["last_dispatch"]["role"], "worker")
+            self.assertEqual(state["task_inputs"], original_task_inputs)
+            self.assertEqual(state["current_task"]["task_inputs"], original_task_inputs)
+            self.assertIn("2. Verify the same complete unit.", state["last_dispatch"]["task_packet"]["plan_task_text"])
+            self.assertEqual(state["last_dispatch"]["task_packet"]["loop_contract"]["iteration"], 2)
+            self.assertIn("do not pre-plan future loop iterations", state["last_dispatch"]["task_packet"]["loop_contract"]["instruction"])
             self.assertEqual(state["gate_attempt"], 0)
             self.assertEqual(state["review"], {})
             self.assertEqual(state["worker_claim"], "")
             self.assertEqual(state["verification_command"], "")
             self.assertEqual(state["verification_result"], "")
+            self.assertEqual(state["loop"]["latest_iteration_evidence"], {})
+            self.assertEqual(state["loop"]["iteration_evidence"][0]["iteration"], 1)
+            self.assertEqual(state["loop"]["iteration_evidence"][0]["review_verdict"], "approve")
+            self.assertEqual(state["loop"]["iteration_evidence"][0]["acceleration_review"]["decision"], "defer")
             registry = json.loads((run_root / "agent_sessions.json").read_text(encoding="utf-8"))
             worker_session = registry["roles"]["worker"]
             self.assertEqual(worker_session["status"], "active")
             self.assertEqual(worker_session["generation"], 1)
             self.assertEqual(worker_session["last_dispatch_owner"], "worker:gate-task-001:3")
-            self.assertTrue((run_root / worker_session["log_path"]).exists())
+            self.assertTrue((run_root / worker_session["role_log_path"]).exists())
             self.assertIn(
                 "dispatch worker:gate-task-001:3",
-                (run_root / worker_session["log_path"]).read_text(encoding="utf-8"),
+                (run_root / worker_session["role_log_path"]).read_text(encoding="utf-8"),
             )
 
     def test_loop_complete_stops_at_max_iterations_and_records_reason(self) -> None:

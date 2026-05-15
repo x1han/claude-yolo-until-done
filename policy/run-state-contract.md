@@ -4,15 +4,29 @@
 
 `<run-root>/trace.md` is secondary operator-facing context. It records the activity trail, but when `trace.md` and `state.json` disagree, `state.json` wins.
 
-## Role agent session files
+## Role-agent routing metadata
 
-`agent_sessions.json` is per `.yolo/` run and stores role-agent routing metadata only.
+`agent_sessions.json` is per `.yolo/` run and stores role-agent routing metadata only. It is not workflow authority; `state.json` remains authoritative for task status, owner, gates, dispatch status, and completion.
 
-Role dispatch metadata includes `agent_id` and runtime routing. `create` creates the role agent once for that generation. `reuse` must resume/send to exactly the stored `agent_id`; it must not create a fresh role agent. Replacement is explicit only and creates a new generation.
+Each role session has:
+- `role_invocation_id`: workflow-generated role/generation audit id.
+- `last_runtime_agent_id`: last observed Agent tool id for audit trail.
+- `generation`: explicit replacement lineage.
+- `continuity_model: project_memory`.
+- project memory path under `.claude/agent-memory/<role>/MEMORY.md`.
+- role log and summary paths under `.yolo/agents/`.
 
-Each role lab notebook lives under `agents/<role>-log.md`. It preserves concise operational context for later continuation or explicit replacement.
+`session_action=create` means create fresh Agent subagent for that turn. Continuity comes from project memory, role log, role summary, and shared docs/state, not exact hidden runtime-agent reuse. `last_runtime_agent_id` is audit-only in this model. Replacement is explicit only.
+
+Each role lab notebook lives under `agents/<role>-log.md`. It preserves concise operational context for later continuation or explicit replacement. Create fresh Agent subagent for this turn, then hydrate from durable context before work.
 
 These files do not override `state.json`. If they are missing, runtime may recreate them. If malformed, runtime fails closed or repairs without mutating workflow state.
+
+## Execution unit
+
+`task_inputs` is one authoritative execution unit for the run. It contains the complete approved spec/plan that worker and watcher use for the acyclic lifecycle. Parsed plan headings may appear as derived review context, but they are not schedulable runtime tasks.
+
+Acyclic mode executes this unit once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence, then executes the complete unit again or stops by policy. Agents and operators must not pre-plan future loop iterations or treat parsed plan sections as loop slices; do not pre-plan future loop iterations.
 
 ## Required `state.json` fields
 

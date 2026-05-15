@@ -14,6 +14,8 @@ class DocsAndTemplatesTest(unittest.TestCase):
             ".claude/agents/worker.md": [
                 "supplied task packet",
                 "Do not give final approval.",
+                "execute the complete approved spec/plan",
+                "do not pre-plan future loop iterations",
             ],
             ".claude/agents/helper.md": [
                 "supplied task packet",
@@ -23,6 +25,8 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "independent review",
                 "checklist",
                 "verification evidence",
+                "same complete approved spec/plan",
+                "preplanned loop slice",
             ],
             ".claude/agents/muse.md": [
                 "Muse",
@@ -50,10 +54,26 @@ class DocsAndTemplatesTest(unittest.TestCase):
                 "Do not mark spec or plan approved without human approval.",
             ],
         }
+        for required_strings in cases.values():
+            required_strings.extend([
+                "memory: project",
+                "project memory",
+                "MEMORY.md",
+                "role log",
+            ])
         for relative, required_strings in cases.items():
             body = (SKILL_ROOT / relative).read_text(encoding="utf-8")
             for required in required_strings:
                 self.assertIn(required, body, f"{relative}: missing {required!r}")
+
+    def test_role_agent_project_memory_files_exist(self) -> None:
+        for role in ("muse", "logos", "worker", "watcher", "helper"):
+            memory = SKILL_ROOT / ".claude" / "agent-memory" / role / "MEMORY.md"
+            body = memory.read_text(encoding="utf-8")
+            self.assertIn(f"# {role} memory", body)
+            self.assertIn("## Role Conventions", body)
+            self.assertIn("## Project Conventions", body)
+            self.assertIn("## Reliable Verification", body)
 
     def test_docs_describe_lightweight_runtime_only(self) -> None:
         legacy_terms = [
@@ -99,6 +119,7 @@ class DocsAndTemplatesTest(unittest.TestCase):
         quickstart = (SKILL_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         required_inputs = (SKILL_ROOT / "policy" / "required-inputs.md").read_text(encoding="utf-8")
+        run_state = (SKILL_ROOT / "policy" / "run-state-contract.md").read_text(encoding="utf-8")
         for body in (readme, quickstart):
             self.assertIn("--mode loop", body)
             self.assertIn("--loop-max-iterations", body)
@@ -114,6 +135,11 @@ class DocsAndTemplatesTest(unittest.TestCase):
             self.assertIn("A+B", body)
             self.assertIn("either stop condition", body)
             self.assertIn("mode/config", body)
+        for body in (readme, quickstart, skill, run_state):
+            self.assertIn("repeat the same complete approved spec/plan", body)
+            self.assertIn("fixed loop N means N complete acyclic executions", body)
+            self.assertIn("default max 10", body)
+            self.assertIn("do not pre-plan future loop iterations", body)
 
     def test_docs_describe_persistent_role_agent_sessions(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
@@ -124,11 +150,15 @@ class DocsAndTemplatesTest(unittest.TestCase):
             self.assertIn("agent_sessions.json", body)
             self.assertIn("role lab notebook", body)
             self.assertIn("per `.yolo/` run", body)
-            self.assertIn("agent_id", body)
-            self.assertIn("resume/send to exactly", body)
-            self.assertIn("fresh role agent", body)
+            self.assertIn("project memory", body)
+            self.assertIn("role_invocation_id", body)
+            self.assertIn("last_runtime_agent_id", body)
+            self.assertIn("fresh Agent subagent", body)
+            self.assertIn("Continuity comes from project memory", body)
+            self.assertIn("state.json", body)
+            self.assertIn("remains authoritative", body)
             self.assertIn("Replacement is explicit only", body)
-        self.assertIn("resume_by_agent_id", readme)
+        self.assertNotIn("resume_by_agent_id", readme)
 
     def test_docs_describe_grill_first_then_yolo_usage(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")

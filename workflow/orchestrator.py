@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from agent_sessions import dispatch_runtime_contract, resolve_role_session
+from agent_sessions import resolve_role_session
 from state import append_trace_event, build_resume_target, state_path, transition_state, utc_now, write_state
 
 
@@ -107,9 +107,23 @@ def resume_after_human(state: dict, guidance: str) -> dict:
     return resumed
 
 
+def build_loop_contract(state: dict) -> dict:
+    loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+    if state.get("mode", "acyclic") != "loop" or not loop.get("enabled"):
+        return {}
+    return {
+        "mode": "loop",
+        "iteration": loop.get("iteration"),
+        "max_iterations": loop.get("max_iterations"),
+        "stop_on_convergence": loop.get("stop_on_convergence"),
+        "converged": loop.get("converged"),
+        "instruction": "In loop mode, execute the complete approved spec/plan for this iteration from current evidence; do not pre-plan future loop iterations or treat parsed plan sections as separate loop iterations.",
+    }
+
+
 def build_task_packet(state: dict, role: str) -> dict:
     inputs = dict(state.get("task_inputs", {}))
-    return {
+    packet = {
         "role": role,
         "task_id": state.get("task_id", ""),
         "task_title": state.get("task_title", ""),
@@ -130,6 +144,10 @@ def build_task_packet(state: dict, role: str) -> dict:
         "verification_command": state.get("verification_command", ""),
         "verification_result": state.get("verification_result", ""),
     }
+    loop_contract = build_loop_contract(state)
+    if loop_contract:
+        packet["loop_contract"] = loop_contract
+    return packet
 
 
 def next_step(state: dict) -> dict:
@@ -279,15 +297,26 @@ def ensure_dispatch_agent_session(dispatch: dict, run_root: Path | None, dispatc
     if run_root is None or dispatch.get("role") == "human":
         return dispatch
     agent_session = dispatch.get("agent_session")
+    if isinstance(agent_session, dict) and agent_session and agent_session.get("continuity_model") == "project_memory":
+        return dispatch
     if isinstance(agent_session, dict) and agent_session:
-        if "runtime" in agent_session:
-            return dispatch
         action = str(agent_session.get("action", ""))
-        agent_id = str(agent_session.get("agent_id", ""))
-        if action and agent_id:
+        role_invocation_id = str(agent_session.get("role_invocation_id") or agent_session.get("role_session_id") or agent_session.get("agent_id") or "")
+        last_runtime_agent_id = str(agent_session.get("last_runtime_agent_id") or agent_session.get("runtime_agent_id") or "")
+        if action and role_invocation_id:
             enriched = dict(dispatch)
             normalized_session = dict(agent_session)
-            normalized_session["runtime"] = dispatch_runtime_contract(action, agent_id)
+            normalized_session.pop("agent_id", None)
+            normalized_session.pop("role_session_id", None)
+            normalized_session.pop("runtime_agent_id", None)
+            normalized_session.pop("runtime", None)
+            normalized_session["role_invocation_id"] = role_invocation_id
+            normalized_session["last_runtime_agent_id"] = last_runtime_agent_id
+            normalized_session["continuity_model"] = "project_memory"
+            normalized_session["memory_scope"] = "project"
+            normalized_session["memory_path"] = f".claude/agent-memory/{dispatch['role']}/MEMORY.md"
+            normalized_session["role_log_path"] = f"agents/{dispatch['role']}-log.md"
+            normalized_session.setdefault("summary_path", f"agents/{dispatch['role']}-summary.md")
             enriched["agent_session"] = normalized_session
             return enriched
         return dispatch
@@ -525,10 +554,9 @@ def orchestrate(run_root: Path, state: dict, consumer_id: str | None = None) -> 
                 return preview_result
         elif preview_result.get("replayed") is True and not preview_mutated:
             preview_session = preview_result.get("agent_session")
-            if not (
-                not preview_session
-                or (isinstance(preview_session, dict) and "runtime" not in preview_session)
-            ):
+            missing_session = not preview_session
+            missing_runtime = isinstance(preview_session, dict) and "runtime" not in preview_session
+            if not missing_session and not missing_runtime:
                 return preview_result
 
         outcome: dict[str, object] = {}

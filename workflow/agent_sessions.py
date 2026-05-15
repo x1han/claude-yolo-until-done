@@ -12,13 +12,24 @@ AGENTS_DIR_NAME = "agents"
 ROLE_NAMES = ("worker", "watcher", "helper", "muse", "logos")
 PLANNING_ROLE_NAMES = ("muse", "logos")
 SESSION_ACTION_CREATE = "create"
-SESSION_ACTION_REUSE = "reuse"
 SESSION_ACTION_REPLACE = "replace"
-RUNTIME_ACTION_CREATE = "create"
-RUNTIME_ACTION_RESUME_BY_AGENT_ID = "resume_by_agent_id"
-SESSION_ACTIONS = {SESSION_ACTION_CREATE, SESSION_ACTION_REUSE, SESSION_ACTION_REPLACE}
+CONTINUITY_MODEL_PROJECT_MEMORY = "project_memory"
+MEMORY_SCOPE_PROJECT = "project"
+SESSION_ACTIONS = {SESSION_ACTION_CREATE, SESSION_ACTION_REPLACE}
 SESSION_STATUSES = {"", "active", "replaced", "failed"}
 PLANNING_ROUND_STATUSES = {"completed", "blocked", "failed"}
+ROLE_MEMORY_TEMPLATE = """# {role} memory
+
+## Role Conventions
+
+## Project Conventions
+
+## Risky Areas
+
+## Reliable Verification
+
+## Recurring Issues
+"""
 
 
 def agent_sessions_path(run_root: Path) -> Path:
@@ -66,13 +77,17 @@ def relative_agent_summary_path(role: str) -> str:
 def default_role_session(role: str) -> dict:
     require_role(role)
     return {
-        "agent_id": "",
+        "role_invocation_id": "",
+        "last_runtime_agent_id": "",
         "generation": 0,
         "status": "",
+        "continuity_model": CONTINUITY_MODEL_PROJECT_MEMORY,
+        "memory_scope": MEMORY_SCOPE_PROJECT,
+        "memory_path": f".claude/agent-memory/{role}/MEMORY.md",
+        "role_log_path": relative_agent_log_path(role),
+        "summary_path": relative_agent_summary_path(role),
         "created_at": "",
         "last_seen_at": "",
-        "log_path": relative_agent_log_path(role),
-        "summary_path": relative_agent_summary_path(role),
         "last_dispatch_owner": "",
         "replacement_reason": "",
     }
@@ -80,16 +95,43 @@ def default_role_session(role: str) -> dict:
 
 def default_agent_sessions() -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "roles": {role: default_role_session(role) for role in ROLE_NAMES},
     }
+
+
+def normalize_role_session(role: str, session: dict) -> dict:
+    merged = default_role_session(role)
+    legacy_agent_id = session.get("agent_id", "")
+    merged.update({key: value for key, value in session.items() if key != "agent_id"})
+    if not merged.get("role_invocation_id"):
+        role_session_id = merged.get("role_session_id", "")
+        if isinstance(role_session_id, str) and role_session_id:
+            merged["role_invocation_id"] = role_session_id
+        elif isinstance(legacy_agent_id, str):
+            merged["role_invocation_id"] = legacy_agent_id
+    if not merged.get("last_runtime_agent_id"):
+        runtime_agent_id = merged.get("runtime_agent_id", "")
+        if isinstance(runtime_agent_id, str):
+            merged["last_runtime_agent_id"] = runtime_agent_id
+    merged.pop("role_session_id", None)
+    merged.pop("runtime_agent_id", None)
+    merged["continuity_model"] = CONTINUITY_MODEL_PROJECT_MEMORY
+    merged["memory_scope"] = MEMORY_SCOPE_PROJECT
+    merged["memory_path"] = f".claude/agent-memory/{role}/MEMORY.md"
+    if "log_path" in merged and "role_log_path" not in merged:
+        merged["role_log_path"] = merged["log_path"]
+    merged.pop("log_path", None)
+    return merged
 
 
 def validate_agent_sessions(payload: object) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("agent_sessions.json is malformed: root must be object")
-    if payload.get("version") != 1:
-        raise ValueError("agent_sessions.json is malformed: version must be 1")
+    if payload.get("version") not in {1, 2}:
+        raise ValueError("agent_sessions.json is malformed: version must be 1 or 2")
+    if payload.get("version") == 1:
+        payload["version"] = 2
     roles = payload.get("roles")
     if not isinstance(roles, dict):
         raise ValueError("agent_sessions.json is malformed: roles must be object")
@@ -104,9 +146,7 @@ def validate_agent_sessions(payload: object) -> dict:
             raise ValueError(f"agent_sessions.json is malformed: invalid status for {role}")
         if not isinstance(generation, int) or isinstance(generation, bool) or generation < 0:
             raise ValueError(f"agent_sessions.json is malformed: invalid generation for {role}")
-        merged = default_role_session(role)
-        merged.update(session)
-        roles[role] = merged
+        roles[role] = normalize_role_session(role, session)
     return payload
 
 
@@ -138,6 +178,19 @@ def ensure_agent_logs(run_root: Path) -> None:
         summary_path = agent_summary_path(run_root, role)
         if not summary_path.exists():
             atomic_write_text(summary_path, f"# {role} summary\n")
+
+
+def project_role_memory_path(project_root: Path, role: str) -> Path:
+    require_role(role)
+    return project_root / ".claude" / "agent-memory" / role / "MEMORY.md"
+
+
+def ensure_project_role_memory_files(project_root: Path) -> None:
+    for role in ROLE_NAMES:
+        memory_path = project_role_memory_path(project_root, role)
+        memory_path.parent.mkdir(parents=True, exist_ok=True)
+        if not memory_path.exists():
+            atomic_write_text(memory_path, ROLE_MEMORY_TEMPLATE.format(role=role))
 
 
 def ensure_agent_session_files(run_root: Path) -> dict:
@@ -224,14 +277,17 @@ def new_agent_id(role: str, generation: int) -> str:
     return f"{role}-{generation}-{uuid4().hex}"
 
 
-def dispatch_runtime_contract(action: str, agent_id: str) -> dict:
+def dispatch_runtime_contract(action: str, role_invocation_id: str, last_runtime_agent_id: str = "") -> dict:
     if action not in SESSION_ACTIONS:
         raise ValueError(f"Unsupported agent session action: {action}")
     return {
         "tool": "Agent",
-        "action": RUNTIME_ACTION_RESUME_BY_AGENT_ID if action == SESSION_ACTION_REUSE else RUNTIME_ACTION_CREATE,
-        "agent_id": agent_id,
-        "must_resume_exact_agent_id": action == SESSION_ACTION_REUSE,
+        "action": SESSION_ACTION_CREATE,
+        "agent_id": "",
+        "role_invocation_id": role_invocation_id,
+        "last_runtime_agent_id": last_runtime_agent_id,
+        "continuity_model": CONTINUITY_MODEL_PROJECT_MEMORY,
+        "memory_scope": MEMORY_SCOPE_PROJECT,
         "replacement_allowed": False,
         "replacement_instruction": "Only replace this role agent through explicit replacement flow after the stored agent is unavailable.",
     }
@@ -243,29 +299,39 @@ def resolve_role_session(run_root: Path, role: str, dispatch_owner: str, now: st
     payload = load_agent_sessions(run_root)
     ensure_agent_logs(run_root)
     session = payload["roles"][role]
-    if session.get("status") == "active" and session.get("agent_id"):
-        action = SESSION_ACTION_REUSE
+    if session.get("status") == "active" and session.get("role_invocation_id"):
+        action = SESSION_ACTION_CREATE
     else:
         session["generation"] = int(session.get("generation", 0)) + 1
-        session["agent_id"] = new_agent_id(role, session["generation"])
+        session["role_invocation_id"] = new_agent_id(role, session["generation"])
+        session["last_runtime_agent_id"] = ""
         session["status"] = "active"
         session["created_at"] = observed_at
         session["replacement_reason"] = ""
         action = SESSION_ACTION_CREATE
     session["last_seen_at"] = observed_at
     session["last_dispatch_owner"] = dispatch_owner
+    runtime = dispatch_runtime_contract(action, session["role_invocation_id"], session.get("last_runtime_agent_id", ""))
     write_agent_sessions(run_root, payload)
     append_role_log_entry(
         run_root,
         role,
         f"dispatch {dispatch_owner}",
         actions=["Dispatch received."],
-        observations=[f"Session action: {action}.", f"Generation: {session['generation']}.", f"Agent: {session['agent_id']}"],
+        observations=[
+            f"Session action: {action}.",
+            f"Generation: {session['generation']}.",
+            f"Role invocation: {session['role_invocation_id']}.",
+            f"Continuity model: {session['continuity_model']}.",
+            f"Project memory: {session['memory_path']}.",
+            f"Role log: {session['role_log_path']}.",
+            f"Last runtime agent: {session.get('last_runtime_agent_id', '') or 'not recorded'}.",
+        ],
         result=["Role session ready."],
         next_steps=["Continue assigned role work."],
         now=observed_at,
     )
-    return {"role": role, "action": action, **session, "runtime": dispatch_runtime_contract(action, session["agent_id"])}
+    return {"role": role, "action": action, **session, "runtime": runtime}
 
 
 def replace_role_session(run_root: Path, role: str, dispatch_owner: str, reason: str, now: str | None = None) -> dict:
@@ -279,7 +345,8 @@ def replace_role_session(run_root: Path, role: str, dispatch_owner: str, reason:
     session["replacement_reason"] = reason
     replacement = default_role_session(role)
     replacement["generation"] = old_generation + 1
-    replacement["agent_id"] = new_agent_id(role, replacement["generation"])
+    replacement["role_invocation_id"] = new_agent_id(role, replacement["generation"])
+    replacement["last_runtime_agent_id"] = ""
     replacement["status"] = "active"
     replacement["created_at"] = observed_at
     replacement["last_seen_at"] = observed_at
@@ -297,7 +364,7 @@ def replace_role_session(run_root: Path, role: str, dispatch_owner: str, reason:
         next_steps=["Resume current dispatch from durable context."],
         now=observed_at,
     )
-    return {"role": role, "action": SESSION_ACTION_REPLACE, **replacement, "runtime": dispatch_runtime_contract(SESSION_ACTION_REPLACE, replacement["agent_id"])}
+    return {"role": role, "action": SESSION_ACTION_REPLACE, **replacement, "runtime": dispatch_runtime_contract(SESSION_ACTION_REPLACE, replacement["role_invocation_id"], "")}
 
 
 def append_role_log_entry(
@@ -331,6 +398,10 @@ def append_role_log_entry(
     path = agent_log_path(run_root, role)
     with path.open("a", encoding="utf-8") as handle:
         handle.write("\n".join(blocks).rstrip() + "\n\n")
+
+
+def record_runtime_agent_id(*args, **kwargs):
+    raise ValueError("runtime agent ids are audit-only in project_memory continuity")
 
 
 def tail_text(path: Path, max_chars: int = 12000) -> str:

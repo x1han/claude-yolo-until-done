@@ -174,6 +174,28 @@ class StopHookTest(unittest.TestCase):
         self.assertIn("hookSpecificOutput", payload)
         self.assertIn("completion certification", payload["hookSpecificOutput"]["additionalContext"])
 
+    def test_session_start_uses_persisted_chinese_for_invalid_complete_repair_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.write_run_bundle(
+                run_root,
+                state=self.make_state(
+                    status="complete",
+                    cleanup_required=False,
+                    certification={},
+                    certification_hash="bad",
+                    dialogue_language={"source": "latest_user_request", "language": "zh-CN", "confidence": 0.8},
+                ),
+            )
+
+            decision, payload = self.capture_session_start(project_dir, run_root)
+
+        self.assertEqual(decision, 0)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("恢复前需要先修复", context)
+        self.assertIn("Issue:", context)
+
     def test_stop_blocks_broken_run_root_even_with_stop_hook_active_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)

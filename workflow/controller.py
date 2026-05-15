@@ -35,6 +35,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verification-command")
     parser.add_argument("--verification-result")
     parser.add_argument("--loop-converged", action="store_true")
+    parser.add_argument("--loop-selected-work")
+    parser.add_argument("--loop-evidence", action="append", default=[])
+    parser.add_argument("--acceleration-decision", choices=("accepted", "defer", "none"))
+    parser.add_argument("--acceleration-evidence", action="append", default=[])
+    parser.add_argument("--gate-safety-basis", action="append", default=[])
 
     parser.add_argument("--verdict", choices=("approve", "rework_required"))
     parser.add_argument("--scope-checked", nargs="*", action="append", default=[])
@@ -109,6 +114,37 @@ def publish_next_dispatch(run_root: Path, state: dict) -> dict | None:
     return result
 
 
+def update_loop_submission_evidence(state: dict, args: argparse.Namespace, timestamp: str) -> None:
+    loop = state.get("loop")
+    if not isinstance(loop, dict) or not loop.get("enabled"):
+        return
+
+    require(args.loop_selected_work is not None, "--loop-selected-work is required for loop submit.")
+    require(args.loop_evidence, "--loop-evidence is required for loop submit.")
+    require(args.acceleration_decision is not None, "--acceleration-decision is required for loop submit.")
+    require(args.acceleration_evidence, "--acceleration-evidence is required for loop submit.")
+    require(args.gate_safety_basis, "--gate-safety-basis is required for loop submit.")
+
+    iteration = loop.get("iteration")
+    loop["converged"] = bool(args.loop_converged)
+    loop["latest_iteration_evidence"] = {
+        "iteration": iteration,
+        "selected_work": args.loop_selected_work,
+        "worker_claim": args.worker_claim,
+        "files_changed": list(args.files_changed or []),
+        "verification_command": args.verification_command,
+        "verification_result": args.verification_result,
+        "evidence": list(args.loop_evidence),
+        "submitted_at": timestamp,
+    }
+    loop["acceleration_review"] = {
+        "iteration": iteration,
+        "decision": args.acceleration_decision,
+        "evidence": list(args.acceleration_evidence),
+        "gate_safety_basis": list(args.gate_safety_basis),
+    }
+
+
 def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> None:
     require(args.actor == "worker", "Only the worker may submit.")
     require(state.get("status") in ALLOWED_SUBMIT_STATUSES, "Worker submit requires active or rework_required state.")
@@ -116,6 +152,7 @@ def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> 
     require(args.worker_claim is not None, "--worker-claim is required for submit.")
     require(args.verification_command is not None, "--verification-command is required for submit.")
     require(args.verification_result is not None, "--verification-result is required for submit.")
+    update_loop_submission_evidence(state, args, timestamp)
 
     clear_completion_certification(state)
     state["status"] = NEEDS_REVIEW_STATUS
@@ -128,9 +165,6 @@ def update_for_submit(state: dict, args: argparse.Namespace, timestamp: str) -> 
     state["verification_command"] = args.verification_command
     state["verification_result"] = args.verification_result
     state["submitted_at"] = timestamp
-    loop = state.get("loop")
-    if isinstance(loop, dict) and loop.get("enabled"):
-        loop["converged"] = bool(args.loop_converged)
     state["review"] = {}
     state["reviewed_at"] = ""
 
@@ -175,12 +209,37 @@ def update_for_review(state: dict, args: argparse.Namespace, timestamp: str) -> 
 
     state["review"] = review
     state["reviewed_at"] = timestamp
+    loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+    acceleration_review = loop.get("acceleration_review") if isinstance(loop.get("acceleration_review"), dict) else {}
+    if loop.get("enabled") and acceleration_review:
+        acceleration_review["review_verdict"] = args.verdict
+        acceleration_review["reviewed_by_watcher"] = True
+        acceleration_review["reviewed_at"] = timestamp
+
+
+def record_completed_loop_iteration(state: dict) -> None:
+    loop = state["loop"]
+    latest = loop.get("latest_iteration_evidence") if isinstance(loop.get("latest_iteration_evidence"), dict) else {}
+    acceleration_review = loop.get("acceleration_review") if isinstance(loop.get("acceleration_review"), dict) else {}
+    require(bool(latest), "Loop iteration completion requires latest iteration evidence.")
+    require(bool(acceleration_review), "Loop iteration completion requires acceleration review evidence.")
+    history = loop.get("iteration_evidence") if isinstance(loop.get("iteration_evidence"), list) else []
+    review = state.get("review") if isinstance(state.get("review"), dict) else {}
+    entry = dict(latest)
+    entry["review_verdict"] = review.get("verdict", "")
+    entry["reviewed_at"] = state.get("reviewed_at", "")
+    entry["acceleration_review"] = acceleration_review
+    history.append(entry)
+    loop["iteration_evidence"] = history
 
 
 def reset_for_next_loop_iteration(state: dict, next_iteration: int) -> None:
     loop = state["loop"]
+    record_completed_loop_iteration(state)
     loop["iteration"] = next_iteration
     loop["stop_reason"] = ""
+    loop["latest_iteration_evidence"] = {}
+    loop["acceleration_review"] = {}
     state["status"] = ACTIVE_STATUS
     state["owner"] = "worker"
     state["next_action"] = "worker_update"

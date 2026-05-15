@@ -42,6 +42,73 @@ CONTINUE_CHOICES = {"继续 yolo", "continue yolo"}
 PROMPT_FIELDS = ("prompt", "text", "userPrompt")
 
 
+def dialogue_language_code(state: dict | None) -> str:
+    if not isinstance(state, dict):
+        return "en"
+    dialogue_language = state.get("dialogue_language")
+    if not isinstance(dialogue_language, dict):
+        return "en"
+    language = str(dialogue_language.get("language", "")).strip()
+    if language.startswith("zh"):
+        return "zh-CN"
+    return "en"
+
+
+def three_way_gate_reason(state: dict) -> str:
+    if dialogue_language_code(state) == "zh-CN":
+        return (
+            "我发现当前项目还有一个 claude-yolo 运行。"
+            "为了避免把未完成的工作和普通对话混在一起，请先选择下一步："
+            "1) 暂停并保留中间文件，同时清理 hooks；"
+            "2) 取消本次运行并清理中间文件和 hooks；"
+            "3) 输入“继续 yolo”继续当前目标。"
+        )
+    return (
+        "I found an active claude-yolo run for this project. "
+        "Before I mix that unfinished work with normal chat, choose the next step: "
+        "1) pause and keep intermediate files while cleaning hooks; "
+        "2) cancel this run and clean intermediate files plus hooks; "
+        "3) type “continue yolo” to continue the current goal."
+    )
+
+
+def session_start_lines(run_root: Path, state: dict | None = None, broken_reason: str | None = None) -> list[str]:
+    language = dialogue_language_code(state)
+    if broken_reason:
+        if language == "zh-CN":
+            return [
+                "当前项目有一个 claude-yolo 运行包，但恢复前需要先修复。",
+                f"Run bundle: {run_root}",
+                f"Issue: {broken_reason}",
+                "请先修复或清理这个运行包，然后再继续。",
+            ]
+        return [
+            "A claude-yolo run bundle is mounted for this project, but it needs repair before resume.",
+            f"Run bundle: {run_root}",
+            f"Issue: {broken_reason}",
+            "Repair or clean up the run bundle before continuing.",
+        ]
+    if language == "zh-CN":
+        return [
+            "当前项目有一个正在进行的 claude-yolo 运行。",
+            f"Run bundle: {run_root}",
+            f"Status: {state.get('status')}",
+            f"Owner: {state.get('owner')}",
+            f"Goal: {state.get('goal')}",
+            f"Next action: {state.get('next_action')}",
+            "请读取 state.json，并从磁盘上的持久状态继续。",
+        ]
+    return [
+        "A claude-yolo run is active for this project.",
+        f"Run bundle: {run_root}",
+        f"Status: {state.get('status')}",
+        f"Owner: {state.get('owner')}",
+        f"Goal: {state.get('goal')}",
+        f"Next action: {state.get('next_action')}",
+        "Read state.json and continue from the durable state on disk.",
+    ]
+
+
 def load_stdin_json() -> dict:
     raw = sys.stdin.read().strip()
     if not raw:
@@ -204,38 +271,13 @@ def build_user_prompt_submit_payload(state: dict, hook_input: dict | None = None
             return {}
         return {
             "decision": "block",
-            "reason": (
-                "claude-yolo 仍处于挂载状态。当前必须三选一："
-                "1) 暂停，保留中间文件并清理 hooks；"
-                "2) 取消，清理中间文件和 hooks；"
-                "3) 继续 yolo。"
-            ),
+            "reason": three_way_gate_reason(state),
         }
     return {}
 
 
 def emit_session_start_context(run_root: Path, state: dict | None = None, broken_reason: str | None = None) -> int:
-    if broken_reason:
-        additional_context = "\n".join(
-            [
-                "A lightweight worker-watcher workflow bundle is mounted for this project but needs repair before resume.",
-                f"Run bundle: {run_root}",
-                f"Issue: {broken_reason}",
-                "Repair or clean up the durable run bundle before continuing.",
-            ]
-        )
-    else:
-        additional_context = "\n".join(
-            [
-                "A lightweight worker-watcher workflow is active for this project.",
-                f"Run bundle: {run_root}",
-                f"Status: {state.get('status')}",
-                f"Owner: {state.get('owner')}",
-                f"Goal: {state.get('goal')}",
-                f"Next action: {state.get('next_action')}",
-                "Reload state.json and continue from the durable state on disk.",
-            ]
-        )
+    additional_context = "\n".join(session_start_lines(run_root, state, broken_reason))
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
@@ -307,7 +349,7 @@ def session_start(project_dir: Path, run_root: Path) -> int:
         return 0
     invalid_complete_reason = invalid_complete_bundle_reason(run_root, state)
     if invalid_complete_reason:
-        return emit_session_start_context(run_root, broken_reason=invalid_complete_reason)
+        return emit_session_start_context(run_root, state=state, broken_reason=invalid_complete_reason)
     if state.get("status") == "complete" and not state.get("cleanup_required"):
         return 0
     return emit_session_start_context(run_root, state=state)

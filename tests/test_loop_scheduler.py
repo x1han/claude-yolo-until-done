@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+if str(SKILL_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILL_ROOT))
 
 from workflow.loop_scheduler import loop_decision
 
@@ -16,14 +22,14 @@ class LoopSchedulerTest(unittest.TestCase):
 
         self.assertEqual(loop_decision(state), {"action": "not_loop", "reason": "loop disabled"})
 
-    def test_loop_stops_at_max_iterations(self) -> None:
+    def test_loop_stops_after_fixed_count_of_complete_acyclic_iterations(self) -> None:
         state = {
             "mode": "loop",
             "status": "complete",
             "loop": {
                 "enabled": True,
-                "iteration": 10,
-                "max_iterations": 10,
+                "iteration": 5,
+                "max_iterations": 5,
                 "stop_on_convergence": False,
                 "converged": False,
                 "stop_reason": "",
@@ -38,15 +44,16 @@ class LoopSchedulerTest(unittest.TestCase):
             "status": "complete",
             "loop": {
                 "enabled": True,
-                "iteration": 9,
-                "max_iterations": 10,
+                "iteration": 4,
+                "max_iterations": 5,
                 "stop_on_convergence": False,
                 "converged": False,
                 "stop_reason": "",
             },
+            "task_inputs": {"plan_task_text": "full approved plan"},
         }
 
-        self.assertEqual(loop_decision(state), {"action": "continue", "next_iteration": 10})
+        self.assertEqual(loop_decision(state), {"action": "continue", "next_iteration": 5})
 
     def test_loop_stops_on_convergence(self) -> None:
         state = {

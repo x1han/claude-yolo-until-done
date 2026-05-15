@@ -8,13 +8,22 @@ WORKFLOW_DIR = HOOKS_DIR.parent / "workflow"
 if str(WORKFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_DIR))
 
-from common import add_check, base_report, load_state, validate_required_state_fields
+from common import add_check, base_report, load_state, validate_loop_evidence_base, validate_required_state_fields
 from lifecycle import READY_FOR_CLEANUP_STATUS, completion_certification_checks
 
 
 REQUIRED_COMPLETE_STATUS = READY_FOR_CLEANUP_STATUS
 REQUIRED_OWNER = "watcher"
 REQUIRED_NEXT_ACTION = "complete"
+
+
+def validate_loop_completion_evidence(report: dict, state: dict) -> None:
+    loop_evidence = validate_loop_evidence_base(report, state)
+    if loop_evidence is None:
+        return
+
+    _latest, acceleration = loop_evidence
+    add_check(report, "loop_acceleration_reviewed_by_watcher", acceleration.get("reviewed_by_watcher") is True, f"acceleration_review={acceleration}")
 
 
 def run(run_root):
@@ -44,6 +53,7 @@ def run(run_root):
     add_check(report, "acceptance_basis_present", bool(review.get("acceptance_basis")), f"acceptance_basis={review.get('acceptance_basis')}")
     add_check(report, "required_rework_empty", not review.get("required_rework"), f"required_rework={review.get('required_rework')}")
     add_check(report, "reviewed_at_present", bool(str(state.get("reviewed_at", "")).strip()), f"reviewed_at={state.get('reviewed_at')}")
+    validate_loop_completion_evidence(report, state)
     add_check(
         report,
         "completion_certification_status_ok",

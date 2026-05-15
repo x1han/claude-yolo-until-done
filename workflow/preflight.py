@@ -12,7 +12,7 @@ from bootstrap import bootstrap_run, fail_if_unsupported_headless_mode
 from checklist import build_checklist_from_state
 from hook_settings import install_hook_set, installed_hook_config_hash, load_json as load_settings_json
 from orchestrator import recover_dispatch_for_resume
-from state import append_trace_event, build_current_task_view, build_loop_state, load_json, load_state, serialize_path, state_path, trace_path, transition_state, write_json
+from state import append_trace_event, build_current_task_view, build_loop_state, detect_dialogue_language, load_json, load_state, serialize_path, state_path, trace_path, transition_state, write_json
 from validate_grill_docs import GrillDocsError, ensure_ready_for_execution
 
 
@@ -275,6 +275,8 @@ def main() -> int:
         help="Success criterion for this run; repeat to provide multiple entries",
     )
     parser.add_argument("--mode", choices=("acyclic", "loop"), default="acyclic", help="Execution mode; defaults to acyclic")
+    parser.add_argument("--dialogue-language", default="", help="Explicit human dialogue language override, such as en or zh-CN")
+    parser.add_argument("--latest-user-request", default="", help="Latest substantive user request for human dialogue language detection")
     parser.add_argument("--loop-max-iterations", type=int, default=None, help="Stop loop mode after this many iterations")
     parser.add_argument(
         "--loop-stop-on-convergence",
@@ -298,6 +300,10 @@ def main() -> int:
 
     runtime = verify_runtime()
     classification = classify_run(run_root)
+    try:
+        dialogue_language = detect_dialogue_language(args.dialogue_language, args.latest_user_request)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
     if classification == "new_run":
         bootstrap_summary = bootstrap_run(
@@ -310,6 +316,7 @@ def main() -> int:
             mode=args.mode,
             loop_max_iterations=args.loop_max_iterations,
             loop_stop_on_convergence=args.loop_stop_on_convergence,
+            dialogue_language=dialogue_language,
         )
         settings = install_hook_set(settings_path, python_exe, bridge_path, args.run_root)
         persist_hook_config_hash(run_root, installed_hook_config_hash(settings, args.run_root))
@@ -325,6 +332,7 @@ def main() -> int:
             "runtime_warnings": runtime["warnings"],
             "mode": args.mode,
             "loop": requested_loop,
+            "dialogue_language": dialogue_language,
         }
         print(json.dumps(payload, ensure_ascii=True))
         return 0
@@ -334,6 +342,14 @@ def main() -> int:
     expected_version = require_state_version(state)
     validate_continue_run_paths(state, project_dir, spec_path, plan_path)
     validate_continue_run_mode(state, args.mode, requested_loop)
+    if args.dialogue_language:
+        requested_language = dialogue_language.get("language", "")
+        existing_language = state.get("dialogue_language") if isinstance(state.get("dialogue_language"), dict) else {}
+        if requested_language != existing_language.get("language"):
+            raise SystemExit(
+                "Continue-run mismatch: --dialogue-language does not match existing run bundle "
+                f"(state language={existing_language.get('language')!r}, provided={requested_language!r})"
+            )
     validate_installed_hook_config(settings_path, args.run_root, state)
     current_checklist_task = load_current_checklist_task(checklist_path, state)
     if build_current_task_view(state) != current_checklist_task:

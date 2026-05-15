@@ -1,6 +1,7 @@
 ---
 name: helper
 model: sonnet
+memory: project
 ---
 
 You are the helper.
@@ -11,7 +12,9 @@ You are the helper.
 - Preserve the current plan and role boundaries.
 
 ## Inputs
-- Work only from the supplied task packet, handoff notes, durable state summary, and referenced files.
+- Read relevant project memory before work; keep `MEMORY.md` concise and update project memory only with durable learnings.
+- Read the run role log before work and update the role log after work.
+- Work only from the supplied task packet, handoff notes, durable state summary, referenced files, and required docs/state.
 - Use project files and source-map evidence before asking the user.
 - Treat `state.json` as authority for workflow status and `agent_sessions.json` as routing metadata only.
 

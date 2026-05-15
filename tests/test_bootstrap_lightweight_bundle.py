@@ -25,7 +25,10 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
         run_root = project_dir / "artifacts" / "run-001"
 
         spec_path.write_text("# Spec\n", encoding="utf-8")
-        plan_path.write_text("# Plan\n\n### Task 1: Ship the lightweight run bundle\n", encoding="utf-8")
+        plan_path.write_text(
+            "# Plan\n\n### Task 1: Ship the lightweight run bundle\n\n### Task 2: Verify the full bundle\n",
+            encoding="utf-8",
+        )
 
         result = subprocess.run(
             [
@@ -154,10 +157,23 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
 
     def test_bootstrap_writes_agent_session_registry_and_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            run_root = Path(tmp) / ".yolo"
-            result = self.run_bootstrap("--run-root", str(run_root))
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Ship the lightweight run bundle\n", encoding="utf-8")
 
-            self.assertEqual(result["run_root"], str(run_root))
+            result = bootstrap_run(
+                spec_path=spec_path,
+                plan_path=plan_path,
+                run_root=run_root,
+                goal="Ship the lightweight run bundle.",
+                success_criteria=["state.json captures the authoritative run state."],
+                repo_root=project_dir,
+            )
+
+            self.assertEqual(result["run_root"], str(run_root.resolve()))
             registry_path = run_root / "agent_sessions.json"
             self.assertTrue(registry_path.exists())
             registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -165,6 +181,11 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
             for role in registry["roles"]:
                 self.assertTrue((run_root / "agents" / f"{role}-log.md").exists())
                 self.assertTrue((run_root / "agents" / f"{role}-summary.md").exists())
+                memory_path = project_dir / ".claude" / "agent-memory" / role / "MEMORY.md"
+                self.assertTrue(memory_path.exists())
+                body = memory_path.read_text(encoding="utf-8")
+                self.assertIn(f"# {role} memory", body)
+                self.assertIn("## Reliable Verification", body)
 
     def test_bootstrap_writes_lightweight_run_bundle(self) -> None:
         result = self.run_bootstrap()
@@ -194,8 +215,11 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
         self.assertEqual(state["plan_path"], "plan.md")
         self.assertEqual(state["spec_path"], "spec.md")
         self.assertEqual(state["task_id"], "task-001")
-        self.assertEqual(state["task_title"], "Ship the lightweight run bundle")
+        self.assertEqual(state["task_title"], "Execute approved spec and plan")
         self.assertEqual(state["task_inputs"]["task_id"], "task-001")
+        self.assertEqual(state["task_inputs"]["task_title"], "Execute approved spec and plan")
+        self.assertIn("### Task 1: Ship the lightweight run bundle", state["task_inputs"]["plan_task_text"])
+        self.assertIn("### Task 2: Verify the full bundle", state["task_inputs"]["plan_task_text"])
         self.assertEqual(state["worker_claim"], "")
         self.assertEqual(state["files_changed"], [])
         self.assertEqual(state["verification_command"], "")
@@ -207,7 +231,9 @@ class BootstrapLightweightBundleTest(unittest.TestCase):
 
         checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
         self.assertEqual(len(checklist["tasks"]), 1)
-        self.assertEqual(checklist["tasks"][0]["task_title"], "Ship the lightweight run bundle")
+        self.assertEqual(checklist["tasks"][0]["task_title"], "Execute approved spec and plan")
+        self.assertEqual(checklist["plan_sections"][0]["task_title"], "Ship the lightweight run bundle")
+        self.assertEqual(checklist["plan_sections"][1]["task_title"], "Verify the full bundle")
 
         trace = trace_path.read_text(encoding="utf-8")
         self.assertIn("# Goal", trace)

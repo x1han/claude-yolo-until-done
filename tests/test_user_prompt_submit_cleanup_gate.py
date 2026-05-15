@@ -53,9 +53,26 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             self.assertIn("UserPromptSubmit", hooks)
             self.assertNotIn("SessionEnd", hooks)
 
-    def test_user_prompt_submit_blocks_with_three_way_choice_when_run_unfinished(self) -> None:
+    def test_user_prompt_submit_blocks_with_english_three_way_choice_by_default(self) -> None:
         payload = build_user_prompt_submit_payload({"status": "rework_required", "cleanup_required": False})
         self.assertEqual(payload["decision"], "block")
+        self.assertIn("I found an active claude-yolo run", payload["reason"])
+        self.assertNotIn("To protect", payload["reason"])
+        self.assertIn("pause", payload["reason"])
+        self.assertIn("cancel", payload["reason"])
+        self.assertIn("continue yolo", payload["reason"])
+
+    def test_user_prompt_submit_blocks_with_persisted_chinese_three_way_choice(self) -> None:
+        payload = build_user_prompt_submit_payload(
+            {
+                "status": "rework_required",
+                "cleanup_required": False,
+                "dialogue_language": {"source": "latest_user_request", "language": "zh-CN", "confidence": 0.8},
+            }
+        )
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("我发现当前项目还有一个 claude-yolo 运行", payload["reason"])
+        self.assertNotIn("为了保护", payload["reason"])
         self.assertIn("暂停", payload["reason"])
         self.assertIn("取消", payload["reason"])
         self.assertIn("继续 yolo", payload["reason"])
@@ -73,7 +90,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             {"prompt": "继续 yolo。读取 .yolo/state.json 并执行前 3 步。"},
         )
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("三选一", payload["reason"])
+        self.assertIn("choose the next step", payload["reason"])
 
     def test_user_prompt_submit_routes_need_human_runs_to_human_helper_mode(self) -> None:
         payload = build_user_prompt_submit_payload(
@@ -109,7 +126,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             {"prompt": "帮我看看现在做到哪一步了"},
         )
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("三选一", payload["reason"])
+        self.assertIn("choose the next step", payload["reason"])
 
     def test_user_prompt_submit_keeps_three_way_gate_when_need_human_is_disabled(self) -> None:
         payload = build_user_prompt_submit_payload(
@@ -123,7 +140,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             {"prompt": "继续讨论一下"},
         )
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("三选一", payload["reason"])
+        self.assertIn("choose the next step", payload["reason"])
 
     def test_user_prompt_submit_keeps_three_way_gate_when_allow_need_human_is_missing(self) -> None:
         payload = build_user_prompt_submit_payload(
@@ -136,7 +153,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
             {"prompt": "继续讨论一下"},
         )
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("三选一", payload["reason"])
+        self.assertIn("choose the next step", payload["reason"])
 
     def test_user_prompt_submit_routes_stop_gate_limit_runs_to_human_helper_mode(self) -> None:
         payload = build_user_prompt_submit_payload(
@@ -187,7 +204,7 @@ class UserPromptSubmitCleanupGateTest(unittest.TestCase):
                 payload = json.loads(stream.getvalue())
             self.assertEqual(decision, 0)
             self.assertEqual(payload["decision"], "block")
-            self.assertIn("继续 yolo", payload["reason"])
+            self.assertIn("continue yolo", payload["reason"])
 
     def test_user_prompt_submit_blocks_when_run_bundle_is_damaged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -122,11 +122,60 @@ def apply_orchestration_defaults(state: dict) -> None:
     state.setdefault("task_scope", [])
     state.setdefault("blocked_for_human", False)
     state.setdefault("allow_need_human", True)
+    state.setdefault("dialogue_language", default_dialogue_language())
     sync_task_derived_fields(state)
 
 
 
 VALID_MODES = {"acyclic", "loop"}
+
+
+def default_dialogue_language() -> dict:
+    return {
+        "source": "default",
+        "language": "en",
+        "confidence": 0.0,
+    }
+
+
+def normalize_dialogue_language(value: str) -> str:
+    normalized = value.strip().lower().replace("_", "-")
+    if normalized in {"zh", "zh-cn", "zh-hans", "chinese", "中文", "汉语", "漢語"}:
+        return "zh-CN"
+    if normalized in {"en", "en-us", "en-gb", "english"}:
+        return "en"
+    return ""
+
+
+def detect_dialogue_language(explicit_override: str = "", latest_user_request: str = "") -> dict:
+    if explicit_override.strip():
+        explicit_language = normalize_dialogue_language(explicit_override)
+        if not explicit_language:
+            raise ValueError(f"Unsupported dialogue language: {explicit_override}")
+        return {
+            "source": "explicit",
+            "language": explicit_language,
+            "confidence": 1.0,
+        }
+
+    request = latest_user_request.strip()
+    if request:
+        cjk_count = sum(1 for char in request if "一" <= char <= "鿿")
+        ascii_letter_count = sum(1 for char in request if char.isascii() and char.isalpha())
+        if cjk_count > 0 and cjk_count >= ascii_letter_count / 2:
+            return {
+                "source": "latest_user_request",
+                "language": "zh-CN",
+                "confidence": 0.8,
+            }
+        if ascii_letter_count > 0:
+            return {
+                "source": "latest_user_request",
+                "language": "en",
+                "confidence": 0.8,
+            }
+
+    return default_dialogue_language()
 
 
 def default_loop_state() -> dict:
@@ -137,6 +186,9 @@ def default_loop_state() -> dict:
         "stop_on_convergence": False,
         "converged": False,
         "stop_reason": "",
+        "iteration_evidence": [],
+        "latest_iteration_evidence": {},
+        "acceleration_review": {},
     }
 
 
@@ -149,6 +201,8 @@ def build_loop_state(mode: str, max_iterations: int | None = None, stop_on_conve
         return default_loop_state()
     if max_iterations is None and not stop_on_convergence:
         raise ValueError("Loop mode requires --loop-max-iterations, --loop-stop-on-convergence, or both.")
+    if max_iterations is None and stop_on_convergence:
+        max_iterations = 10
     if max_iterations is not None and max_iterations < 1:
         raise ValueError("Loop max_iterations must be a positive integer.")
     payload = default_loop_state()
@@ -168,6 +222,7 @@ def build_state(
     mode: str = "acyclic",
     loop_max_iterations: int | None = None,
     loop_stop_on_convergence: bool = False,
+    dialogue_language: dict | None = None,
 ) -> dict:
     state = load_json(template_path)
     state["goal"] = goal
@@ -184,6 +239,8 @@ def build_state(
     state["next_action"] = "worker_update"
     state["mode"] = mode
     state["loop"] = build_loop_state(mode, loop_max_iterations, loop_stop_on_convergence)
+    if dialogue_language is not None:
+        state["dialogue_language"] = dialogue_language
     state["cleanup_required"] = False
     apply_orchestration_defaults(state)
     state["plan_path"] = serialize_path(plan_path, repo_root)

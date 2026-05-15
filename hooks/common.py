@@ -85,3 +85,26 @@ def validate_required_state_fields(report: dict, state: dict) -> bool:
         add_check(report, f"state_field_{field_name}_present", present, f"field={field_name}")
         ok = ok and present
     return ok
+
+
+def has_non_empty_text(items: object) -> bool:
+    return isinstance(items, list) and any(isinstance(item, str) and item.strip() for item in items)
+
+
+def validate_loop_evidence_base(report: dict, state: dict) -> tuple[dict, dict] | None:
+    loop = state.get("loop") if isinstance(state.get("loop"), dict) else {}
+    if not loop.get("enabled"):
+        return None
+
+    latest = loop.get("latest_iteration_evidence") if isinstance(loop.get("latest_iteration_evidence"), dict) else {}
+    acceleration = loop.get("acceleration_review") if isinstance(loop.get("acceleration_review"), dict) else {}
+    iteration = loop.get("iteration")
+    add_check(report, "loop_latest_iteration_evidence_present", bool(latest), f"latest_iteration_evidence={latest}")
+    add_check(report, "loop_latest_iteration_matches_current", latest.get("iteration") == iteration, f"iteration={iteration} latest={latest}")
+    add_check(report, "loop_latest_evidence_present", has_non_empty_text(latest.get("evidence")), f"latest_iteration_evidence={latest}")
+    add_check(report, "loop_acceleration_review_present", bool(acceleration), f"acceleration_review={acceleration}")
+    add_check(report, "loop_acceleration_iteration_matches_current", acceleration.get("iteration") == iteration, f"iteration={iteration} acceleration_review={acceleration}")
+    add_check(report, "loop_acceleration_decision_present", acceleration.get("decision") in {"accepted", "defer", "none"}, f"acceleration_review={acceleration}")
+    add_check(report, "loop_acceleration_evidence_present", has_non_empty_text(acceleration.get("evidence")), f"acceleration_review={acceleration}")
+    add_check(report, "loop_gate_safety_basis_present", has_non_empty_text(acceleration.get("gate_safety_basis")), f"acceleration_review={acceleration}")
+    return latest, acceleration

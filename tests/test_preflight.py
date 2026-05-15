@@ -14,7 +14,7 @@ BOOTSTRAP_PATH = SKILL_ROOT / "workflow" / "bootstrap.py"
 
 
 class ChecklistBootstrapTest(unittest.TestCase):
-    def test_bootstrap_writes_master_checklist_and_task_inputs(self) -> None:
+    def test_bootstrap_writes_whole_plan_execution_unit_and_review_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec_path = root / "spec.md"
@@ -24,10 +24,8 @@ class ChecklistBootstrapTest(unittest.TestCase):
                 "# Spec\n\n## Scope\n- Only touch workflow files\n\n## Success Criteria\n- Stop blocks unfinished runs\n",
                 encoding="utf-8",
             )
-            plan_path.write_text(
-                "# Plan\n\n### Task 1: Tighten stop hook\n- Preserve fail-closed behavior.\n\n### Task 2: Add orchestrator routing\n- Route follow-up work correctly.\n",
-                encoding="utf-8",
-            )
+            plan_body = "# Plan\n\n### Task 1: Tighten stop hook\n- Preserve fail-closed behavior.\n\n### Task 2: Add orchestrator routing\n- Route follow-up work correctly.\n"
+            plan_path.write_text(plan_body, encoding="utf-8")
 
             result = subprocess.run(
                 [
@@ -53,16 +51,17 @@ class ChecklistBootstrapTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
             checklist = json.loads((run_root / "watcher_checklist.json").read_text(encoding="utf-8"))
-            first_task = checklist["tasks"][0]
-            second_task = checklist["tasks"][1]
+            execution_unit = checklist["tasks"][0]
 
-            self.assertEqual(len(checklist["tasks"]), 2)
-            self.assertEqual(state["task_title"], first_task["task_title"])
-            self.assertEqual(state["task_inputs"], first_task)
-            self.assertEqual(state["task_inputs"]["task_title"], "Tighten stop hook")
-            self.assertEqual(state["task_inputs"]["plan_task_text"], "### Task 1: Tighten stop hook")
-            self.assertEqual(second_task["task_title"], "Add orchestrator routing")
-            self.assertEqual(second_task["plan_task_text"], "### Task 2: Add orchestrator routing")
+            self.assertEqual(len(checklist["tasks"]), 1)
+            self.assertEqual(state["task_title"], "Execute approved spec and plan")
+            self.assertEqual(state["task_inputs"], execution_unit)
+            self.assertEqual(state["task_inputs"]["task_title"], "Execute approved spec and plan")
+            self.assertEqual(state["task_inputs"]["plan_task_text"], plan_body.strip())
+            self.assertIn("### Task 1: Tighten stop hook", state["task_inputs"]["plan_task_text"])
+            self.assertIn("### Task 2: Add orchestrator routing", state["task_inputs"]["plan_task_text"])
+            self.assertEqual(checklist["plan_sections"][0]["task_title"], "Tighten stop hook")
+            self.assertEqual(checklist["plan_sections"][1]["task_title"], "Add orchestrator routing")
             self.assertIn("Stop blocks unfinished runs", state["task_inputs"]["spec_excerpt"])
 
     def test_bootstrap_numbered_fallback_uses_task_section_not_earlier_overview_list(self) -> None:
@@ -98,8 +97,11 @@ class ChecklistBootstrapTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             checklist = json.loads((run_root / "watcher_checklist.json").read_text(encoding="utf-8"))
-            self.assertEqual(checklist["tasks"][0]["task_title"], "Tighten stop hook")
-            self.assertEqual(checklist["tasks"][0]["plan_task_text"], "1. Tighten stop hook")
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(checklist["plan_sections"][0]["task_title"], "Tighten stop hook")
+            self.assertEqual(checklist["plan_sections"][0]["plan_task_text"], "1. Tighten stop hook")
+            self.assertIn("## Tasks", state["task_inputs"]["plan_task_text"])
+            self.assertIn("2. Add orchestrator routing", state["task_inputs"]["plan_task_text"])
 
 
 class PreflightTest(unittest.TestCase):
@@ -290,10 +292,13 @@ class PreflightTest(unittest.TestCase):
                     "stop_on_convergence": False,
                     "converged": False,
                     "stop_reason": "",
+                    "iteration_evidence": [],
+                    "latest_iteration_evidence": {},
+                    "acceleration_review": {},
                 },
             )
 
-    def test_preflight_persists_loop_policy_for_new_run(self) -> None:
+    def test_preflight_persists_loop_policy_and_evidence_defaults_for_new_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -305,20 +310,69 @@ class PreflightTest(unittest.TestCase):
                 spec_path,
                 plan_path,
                 goal="Run repeatedly until stop policy fires.",
-                extra_args=["--mode", "loop", "--loop-max-iterations", "10", "--loop-stop-on-convergence"],
+                extra_args=["--mode", "loop", "--loop-max-iterations", "5", "--loop-stop-on-convergence"],
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["mode"], "loop")
-            self.assertEqual(payload["loop"]["max_iterations"], 10)
+            self.assertEqual(payload["loop"]["max_iterations"], 5)
             self.assertTrue(payload["loop"]["stop_on_convergence"])
             self.assertEqual(state["mode"], "loop")
-            self.assertEqual(state["loop"]["iteration"], 1)
+
+    def test_preflight_defaults_convergence_loop_to_ten_iterations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Run repeatedly until convergence.",
+                extra_args=["--mode", "loop", "--loop-stop-on-convergence"],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["loop"]["max_iterations"], 10)
+            self.assertTrue(payload["loop"]["stop_on_convergence"])
             self.assertEqual(state["loop"]["max_iterations"], 10)
+            self.assertEqual(state["loop"]["iteration"], 1)
             self.assertTrue(state["loop"]["stop_on_convergence"])
             self.assertEqual(state["loop"]["stop_reason"], "")
+            self.assertEqual(state["loop"]["iteration_evidence"], [])
+            self.assertEqual(state["loop"]["latest_iteration_evidence"], {})
+            self.assertEqual(state["loop"]["acceleration_review"], {})
+
+    def test_preflight_persists_dialogue_language_defaults_for_new_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Run once with persisted dialogue-language metadata.",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["dialogue_language"],
+                {
+                    "source": "default",
+                    "language": "en",
+                    "confidence": 0.0,
+                },
+            )
 
     def test_preflight_rejects_loop_policy_when_mode_is_acyclic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -628,13 +682,9 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(initial.returncode, 0, initial.stderr)
 
             checklist_path = run_root / "watcher_checklist.json"
-            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
-            second_task = checklist["tasks"][1]
             state_path = run_root / "state.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            state["task_id"] = second_task["task_id"]
-            state["task_title"] = second_task["task_title"]
-            state["task_inputs"] = second_task
+            state["task_inputs"]["checklist_items"].append("additional continue-run check")
             state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
             env = self.runtime_env(project_dir)
@@ -670,10 +720,10 @@ class PreflightTest(unittest.TestCase):
 
             rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
             persisted_state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(rebuilt["current_task"]["task_id"], second_task["task_id"])
-            self.assertEqual(rebuilt["current_task"]["task_title"], second_task["task_title"])
-            self.assertEqual(rebuilt["tasks"][0], second_task)
-            self.assertEqual(persisted_state["task_id"], second_task["task_id"])
+            self.assertEqual(rebuilt["current_task"]["task_id"], state["task_id"])
+            self.assertEqual(rebuilt["current_task"]["task_title"], state["task_title"])
+            self.assertEqual(rebuilt["tasks"][0], state["task_inputs"])
+            self.assertEqual(persisted_state["task_inputs"], state["task_inputs"])
 
     def test_preflight_rejects_inconsistent_authoritative_task_state_before_rebuilding_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -697,12 +747,10 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(initial.returncode, 0, initial.stderr)
 
             checklist_path = run_root / "watcher_checklist.json"
-            checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
-            second_task = checklist["tasks"][1]
             state_path = run_root / "state.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            state["task_id"] = second_task["task_id"]
-            state["task_title"] = second_task["task_title"]
+            state["task_id"] = "task-999"
+            state["task_title"] = "Corrupted task title"
             state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
             checklist_path.unlink(missing_ok=True)
 
