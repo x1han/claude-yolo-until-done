@@ -4,6 +4,8 @@
 
 `<run-root>/trace.md` is secondary operator-facing context. It records the activity trail, but when `trace.md` and `state.json` disagree, `state.json` wins.
 
+Preflight reports one explicit operator action: `init_planning`, `continue_planning`, `await_human_approval`, `bootstrap_execution`, `resume_execution`, or `repair_state`. Each blocked report includes current state, evidence, blocked-on item, and next safe action.
+
 ## Role-agent routing metadata
 
 `agent_sessions.json` is per `.yolo/` run and stores role-agent routing metadata only. It is not workflow authority; `state.json` remains authoritative for task status, owner, gates, dispatch status, and completion.
@@ -27,6 +29,8 @@ These files do not override `state.json`. If they are missing, runtime may recre
 `task_inputs` is one authoritative execution unit for the run. It contains the complete approved spec/plan that worker and watcher use for the acyclic lifecycle. Parsed plan headings may appear as derived review context, but they are not schedulable runtime tasks.
 
 Acyclic mode executes this unit once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence, then executes the complete unit again or stops by policy. Agents and operators must not pre-plan future loop iterations or treat parsed plan sections as loop slices; do not pre-plan future loop iterations.
+
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
 
 ## Required `state.json` fields
 

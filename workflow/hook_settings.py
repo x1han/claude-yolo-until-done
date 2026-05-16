@@ -34,10 +34,14 @@ def write_json(path: Path, payload: dict) -> None:
     write_json_if_changed(path, payload)
 
 
-def write_json_if_changed(path: Path, payload: dict) -> None:
-    rendered = json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+def rendered_json(payload: dict) -> str:
+    return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+
+
+def write_json_if_changed(path: Path, payload: dict) -> bool:
+    rendered = rendered_json(payload)
     if path.exists() and path.read_text(encoding="utf-8") == rendered:
-        return
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_file = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False)
     temp_path = Path(temp_file.name)
@@ -48,10 +52,20 @@ def write_json_if_changed(path: Path, payload: dict) -> None:
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+    return True
+
+
+HOOK_RESULT_KEY = "_hook_result"
 
 
 def normalize_run_root(run_root: str) -> str:
     return Path(run_root).as_posix()
+
+
+def with_hook_result(settings: dict, changed: bool, run_root: str) -> dict:
+    returned = dict(settings)
+    returned[HOOK_RESULT_KEY] = {"changed": changed, "run_root": run_root}
+    return returned
 
 
 def workflow_markers(settings: dict) -> dict:
@@ -236,8 +250,8 @@ def install_hook_set(settings_path: Path, python_exe: Path, bridge_path: Path, r
             "workflow": "claude-yolo-until-done",
             "run_root": normalized_run_root,
         }
-        write_json_if_changed(settings_path, settings)
-        return settings
+        changed = write_json_if_changed(settings_path, settings)
+        return with_hook_result(settings, changed, normalized_run_root)
 
 
 def uninstall_hook_set(settings_path: Path, python_exe: Path, bridge_path: Path, run_root: str) -> dict:
@@ -257,8 +271,8 @@ def uninstall_hook_set(settings_path: Path, python_exe: Path, bridge_path: Path,
             del marker_runs[normalized_run_root]
         if isinstance(marker_root, dict) and not marker_root.get("runs") and "claudeYoloUntilDone" in settings:
             del settings["claudeYoloUntilDone"]
-        write_json_if_changed(settings_path, settings)
-        return settings
+        changed = write_json_if_changed(settings_path, settings)
+        return with_hook_result(settings, changed, normalized_run_root)
 
 
 def main() -> int:

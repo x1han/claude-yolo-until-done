@@ -68,7 +68,16 @@ def main() -> int:
     except StaleStateVersionError as error:
         fail(str(error))
 
-    print(json.dumps({"result": "recorded", "event": args.event, "state_version": state["state_version"]}, ensure_ascii=True))
+    event_label = "token I/O" if args.event == "token_io" else "progress"
+    print(json.dumps({
+        "result": "recorded",
+        "event": args.event,
+        "state_version": state["state_version"],
+        "current_state": f"Worker {event_label} heartbeat recorded.",
+        "evidence": str(run_root / "state.json"),
+        "blocked_on": "",
+        "next": "Continue current worker dispatch.",
+    }, ensure_ascii=True))
     return 0
 
 

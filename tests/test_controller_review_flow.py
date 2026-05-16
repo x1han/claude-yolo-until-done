@@ -224,6 +224,56 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["loop"]["iteration"], 1)
             self.assertEqual(state["loop"]["stop_reason"], "converged")
 
+    def test_loop_submit_rejects_plan_section_execution_unit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            run_root = project_dir / ".yolo"
+            self.bootstrap_loop_run(project_dir, run_root, max_iterations=2)
+            state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
+            first_section = state["task_inputs"]["plan_sections"][0]
+            state["task_id"] = first_section["task_id"]
+            state["task_title"] = first_section["task_title"]
+            state["task_inputs"] = first_section
+            (run_root / "state.json").write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            submit = subprocess.run(
+                [
+                    sys.executable,
+                    str(CONTROLLER_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--actor",
+                    "worker",
+                    "--action",
+                    "submit",
+                    "--expected-version",
+                    "1",
+                    "--worker-claim",
+                    "Implemented only one plan section.",
+                    "--verification-command",
+                    "python -m unittest tests.test_controller_review_flow",
+                    "--verification-result",
+                    "pass",
+                    "--loop-selected-work",
+                    "one plan section",
+                    "--loop-evidence",
+                    "section test passed",
+                    "--acceleration-decision",
+                    "defer",
+                    "--acceleration-evidence",
+                    "no shortcut",
+                    "--gate-safety-basis",
+                    "watcher still required",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(submit.returncode, 0)
+            self.assertIn("complete approved spec/plan", submit.stderr)
+
     def test_no_human_run_rejects_need_human(self) -> None:
         state = {
             "allow_need_human": False,

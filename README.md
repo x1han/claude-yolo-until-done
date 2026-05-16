@@ -80,6 +80,8 @@ Runtime status model is intentionally small:
 - `approved`
 - `ready_for_cleanup`
 
+Preflight reports one explicit operator action: `init_planning`, `continue_planning`, `await_human_approval`, `bootstrap_execution`, `resume_execution`, or `repair_state`. Each blocked report includes current state, evidence, blocked-on item, and next safe action.
+
 ## Preflight And Bootstrap
 
 Default new-run startup uses first-party grill-storm docs under `<project>/docs/`. Run `workflow/init_grill_docs.py` when those docs do not exist, iterate with `workflow/grill_storm_loop.py` until `docs/spec.md` and `docs/plan.md` are approved, then run `workflow/preflight.py` without `--spec/--plan` to execute the default docs.
@@ -103,6 +105,8 @@ That creates:
 - `<run-root>/trace.md`
 
 Default execution mode is acyclic: one approved spec/plan run reaches cleanup. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit until one stop policy fires. fixed loop N means N complete acyclic executions. Convergence-only loops use default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations.
+
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
 
 Loop mode repeats the same acyclic core until one stop policy fires:
 

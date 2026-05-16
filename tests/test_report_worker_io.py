@@ -81,6 +81,36 @@ class ReportWorkerIoCliTest(unittest.TestCase):
             self.assertTrue(state["supervision"]["last_token_io_at"])
             self.assertEqual(state["state_version"], 3)
 
+    def test_report_progress_outputs_operator_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / ".yolo"
+            self.write_run_state(run_root)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPORT_WORKER_IO_PATH),
+                    "--run-root",
+                    str(run_root),
+                    "--event",
+                    "progress",
+                    "--dispatch-owner",
+                    "worker:gate-task-001:3",
+                    "--expected-version",
+                    "2",
+                ],
+                cwd=SKILL_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["result"], "recorded")
+            self.assertEqual(payload["current_state"], "Worker progress heartbeat recorded.")
+            self.assertEqual(payload["blocked_on"], "")
+            self.assertEqual(payload["next"], "Continue current worker dispatch.")
+
     def test_report_token_io_rejects_stale_dispatch_owner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp) / ".yolo"

@@ -32,6 +32,8 @@ This skill is fail-closed workflow, not general coding prompt. If runtime, plann
 - This skill may not replace planning with hidden assumptions, rewrite scope silently, or weaken verification because current session is tired, compressed, or blocked.
 
 ## Startup Contract
+Preflight reports one explicit operator action: `init_planning`, `continue_planning`, `await_human_approval`, `bootstrap_execution`, `resume_execution`, or `repair_state`. Each blocked report includes current state, evidence, blocked-on item, and next safe action.
+
 - Planning start: initialize `docs/intent.md`, `docs/open-questions.md`, `docs/decisions.md`, `docs/spec.md`, and `docs/plan.md` with `workflow/init_grill_docs.py`.
 - Planning loop command: use `workflow/grill_storm_loop.py next --project-dir <output-folder> --run-root <output-folder>/.yolo` to get either a terminal planning status or a structured `dispatch_required` payload.
 - When `dispatch_required` is returned, follow its role session routing: `session_action: create` means create fresh Agent subagent for that turn using emitted prompt and durable context files. Do not assume hidden live session reuse. Then record `{"dispatch_request": ..., "round_result": ...}` with `workflow/grill_storm_loop.py record --result-json ...`.
@@ -96,6 +98,8 @@ Worker may submit only with fresh verification evidence.
 Watcher must review before completion and must record structured review payload.
 
 Default mode is acyclic: execute the complete approved spec/plan once. Loop mode is selected only at preflight/bootstrap with `--mode loop` plus `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations. A+B uses either stop condition, and continue-run must fail closed on mode/config drift.
+
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
 
 `state.json` is authoritative. `trace.md` is supporting audit evidence.
 

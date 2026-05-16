@@ -19,6 +19,20 @@ import hook_settings
 
 
 class HookSettingsTest(unittest.TestCase):
+    def test_install_hook_set_reports_changed_then_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings_path = Path(tmp) / ".claude" / "settings.local.json"
+            python_exe = Path("/usr/bin/python3")
+            bridge_path = Path("/tmp/claude_hook_bridge.py")
+
+            first = hook_settings.install_hook_set(settings_path, python_exe, bridge_path, ".yolo")
+            second = hook_settings.install_hook_set(settings_path, python_exe, bridge_path, ".yolo")
+
+            self.assertTrue(first["_hook_result"]["changed"])
+            self.assertFalse(second["_hook_result"]["changed"])
+            self.assertEqual(first["_hook_result"]["run_root"], ".yolo")
+            self.assertEqual(second["_hook_result"]["run_root"], ".yolo")
+
     def test_concurrent_install_preserves_both_run_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings_path = Path(tmp) / ".claude" / "settings.local.json"

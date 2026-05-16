@@ -66,6 +66,22 @@ class DocsAndTemplatesTest(unittest.TestCase):
             for required in required_strings:
                 self.assertIn(required, body, f"{relative}: missing {required!r}")
 
+    def test_role_docs_use_operator_report_language_without_mechanical_policy_phrasing(self) -> None:
+        forbidden = [
+            "according to skill",
+            "I must follow the skill",
+            "the workflow says I have to",
+            "as required by the skill",
+        ]
+        for relative in ("agents/worker.md", "agents/watcher.md", "agents/muse.md", "agents/logos.md"):
+            body = (SKILL_ROOT / relative).read_text(encoding="utf-8")
+            lowered = body.lower()
+            for phrase in forbidden:
+                self.assertNotIn(phrase.lower(), lowered, relative)
+            self.assertIn("Current state", body, relative)
+            self.assertIn("Evidence", body, relative)
+            self.assertIn("Next", body, relative)
+
     def test_role_agent_project_memory_is_local_runtime_state(self) -> None:
         self.assertFalse((SKILL_ROOT / ".claude" / "agent-memory").exists())
 
@@ -107,6 +123,28 @@ class DocsAndTemplatesTest(unittest.TestCase):
         self.assertIn("claude -p", quickstart)
         self.assertIn("claude -p", skill)
         self.assertIn("claude -p", runtime)
+
+    def test_docs_describe_explicit_preflight_actions_and_loop_guard(self) -> None:
+        docs = [
+            "README.md",
+            "QUICKSTART.md",
+            "SKILL.md",
+            "policy/required-inputs.md",
+            "policy/run-state-contract.md",
+        ]
+        required = [
+            "init_planning",
+            "continue_planning",
+            "await_human_approval",
+            "bootstrap_execution",
+            "resume_execution",
+            "repair_state",
+            "complete approved spec/plan execution unit",
+        ]
+        for relative in docs:
+            body = (SKILL_ROOT / relative).read_text(encoding="utf-8")
+            for token in required:
+                self.assertIn(token, body, f"{relative}: missing {token!r}")
 
     def test_docs_describe_loop_mode_usage_and_stop_policy(self) -> None:
         readme = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")

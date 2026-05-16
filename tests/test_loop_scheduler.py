@@ -8,6 +8,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 if str(SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT))
 
+from workflow import loop_scheduler
 from workflow.loop_scheduler import loop_decision
 
 
@@ -21,6 +22,41 @@ class LoopSchedulerTest(unittest.TestCase):
         state = {"mode": "loop", "status": "complete", "loop": {"enabled": False, "iteration": 1}}
 
         self.assertEqual(loop_decision(state), {"action": "not_loop", "reason": "loop disabled"})
+
+    def test_loop_unit_guard_accepts_complete_execution_unit(self) -> None:
+        state = {
+            "mode": "loop",
+            "loop": {"enabled": True, "iteration": 2},
+            "task_title": "Execute approved spec and plan",
+            "task_inputs": {
+                "task_id": "task-001",
+                "task_title": "Execute approved spec and plan",
+                "plan_task_text": "# Plan\n\n### Task 1: First\n\n### Task 2: Second",
+                "plan_sections": [
+                    {"task_id": "plan-section-001", "task_title": "First", "plan_task_text": "### Task 1: First"},
+                    {"task_id": "plan-section-002", "task_title": "Second", "plan_task_text": "### Task 2: Second"},
+                ],
+            },
+        }
+
+        self.assertEqual(loop_scheduler.loop_execution_unit_problem(state), "")
+
+    def test_loop_unit_guard_rejects_plan_section_as_current_unit(self) -> None:
+        state = {
+            "mode": "loop",
+            "loop": {"enabled": True, "iteration": 2},
+            "task_title": "First",
+            "task_inputs": {
+                "task_id": "plan-section-001",
+                "task_title": "First",
+                "plan_task_text": "### Task 1: First",
+                "plan_sections": [
+                    {"task_id": "plan-section-001", "task_title": "First", "plan_task_text": "### Task 1: First"},
+                ],
+            },
+        }
+
+        self.assertEqual(loop_scheduler.loop_execution_unit_problem(state), "loop task_inputs points at a plan section instead of the complete approved spec/plan")
 
     def test_loop_stops_after_fixed_count_of_complete_acyclic_iterations(self) -> None:
         state = {

@@ -2,6 +2,8 @@
 
 Before workflow starts, first classify run type.
 
+Preflight reports one explicit operator action: `init_planning`, `continue_planning`, `await_human_approval`, `bootstrap_execution`, `resume_execution`, or `repair_state`. Each blocked report includes current state, evidence, blocked-on item, and next safe action.
+
 ## New run
 
 A new run requires all of following:
@@ -13,6 +15,8 @@ A new run requires all of following:
 In this branch, preflight should bootstrap run root before ordinary execution continues.
 
 Default execution mode is acyclic. To repeat the same approved plan, choose loop mode at startup with `--mode loop` and at least one stop policy: `--loop-max-iterations`, `--loop-stop-on-convergence`, or both. Loop mode: repeat the same complete approved spec/plan; fixed loop N means N complete acyclic executions, convergence-only loop uses default max 10, and agents must not pre-plan future loop iterations. A+B uses either stop condition.
+
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
 
 ## Continue run
 

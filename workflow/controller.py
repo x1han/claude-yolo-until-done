@@ -15,7 +15,7 @@ from lifecycle import (
     clear_completion_certification,
     compute_certification_hash,
 )
-from loop_scheduler import loop_decision
+from loop_scheduler import loop_decision, loop_execution_unit_problem
 from orchestrator import IDLE_STATUS, LIVE_CLAIM_STATUSES, PENDING_STATUS, consume_dispatch, default_consumer_id, dispatch_consumer_id, mark_dispatch_pending
 from state import StaleStateVersionError, append_trace_event, build_resume_target, format_trace_value, transition_state
 
@@ -118,6 +118,9 @@ def update_loop_submission_evidence(state: dict, args: argparse.Namespace, times
     loop = state.get("loop")
     if not isinstance(loop, dict) or not loop.get("enabled"):
         return
+
+    unit_problem = loop_execution_unit_problem(state)
+    require(not unit_problem, unit_problem)
 
     require(args.loop_selected_work is not None, "--loop-selected-work is required for loop submit.")
     require(args.loop_evidence, "--loop-evidence is required for loop submit.")

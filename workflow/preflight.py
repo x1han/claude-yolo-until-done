@@ -10,7 +10,8 @@ from pathlib import Path
 
 from bootstrap import bootstrap_run, fail_if_unsupported_headless_mode
 from checklist import build_checklist_from_state
-from hook_settings import install_hook_set, installed_hook_config_hash, load_json as load_settings_json
+from hook_settings import HOOK_RESULT_KEY, install_hook_set, installed_hook_config_hash, load_json as load_settings_json
+from loop_scheduler import loop_execution_unit_problem
 from orchestrator import recover_dispatch_for_resume
 from state import append_trace_event, build_current_task_view, build_loop_state, detect_dialogue_language, load_json, load_state, serialize_path, state_path, trace_path, transition_state, write_json
 from validate_grill_docs import GrillDocsError, ensure_ready_for_execution
@@ -52,13 +53,15 @@ def verify_runtime() -> dict:
     }
 
 
-def classify_run(run_root: Path) -> str:
+def classify_run(run_root: Path, run_root_arg: str) -> str:
     has_state = state_path(run_root).exists()
     has_trace = trace_path(run_root).exists()
-    if has_state:
+    if has_state and has_trace:
         return "continue_run"
+    if has_state:
+        emit_blocked_payload(repair_state_payload(run_root_arg, f"{run_root_arg}/state.json exists without {run_root_arg}/trace.md"))
     if has_trace:
-        raise SystemExit("Mixed run bundle state detected; trace.md exists without authoritative state.json.")
+        emit_blocked_payload(repair_state_payload(run_root_arg, f"{run_root_arg}/trace.md exists without {run_root_arg}/state.json"))
     return "new_run"
 
 
@@ -157,12 +160,50 @@ def grill_storm_status_text(project_dir: Path) -> str:
 
 
 
+def emit_blocked_payload(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=True))
+    raise SystemExit(1)
+
+
+def missing_default_docs_payload(project_dir: Path) -> dict:
+    return {
+        "classification": "planning_needed",
+        "action": "init_planning",
+        "current_state": "Default grill-storm planning docs are missing.",
+        "evidence": str((project_dir / "docs").resolve()),
+        "blocked_on": "docs/intent.md docs/open-questions.md docs/decisions.md docs/spec.md docs/plan.md",
+        "next": "Run workflow/init_grill_docs.py --project-dir <project> --request <request>, then continue first-party skills/grill-storm until spec and plan are approved.",
+        "human_required": True,
+    }
+
+
+def planning_not_ready_payload(project_dir: Path, detail: str) -> dict:
+    return {
+        "classification": "planning_needed",
+        "action": "continue_planning",
+        "current_state": "First-party grill-storm planning docs exist but are not execution-ready.",
+        "evidence": str((project_dir / "docs").resolve()),
+        "blocked_on": detail,
+        "next": "Continue skills/grill-storm planning or record required human approval before execution.",
+        "human_required": "human_" in detail or "human " in detail,
+    }
+
+
+def repair_state_payload(run_root_arg: str, blocked_on: str) -> dict:
+    return {
+        "classification": "invalid_run",
+        "action": "repair_state",
+        "current_state": "Run bundle is incomplete or inconsistent.",
+        "evidence": run_root_arg,
+        "blocked_on": blocked_on,
+        "next": "Safe next step: repair the run bundle, or cancel/remove the incomplete run root after confirming no work must be preserved.",
+        "human_required": True,
+    }
+
+
 def require_planning_inputs_ready(project_dir: Path, spec_path: Path, plan_path: Path, planning_source: str) -> None:
     if planning_source == "grill-storm" and (not spec_path.exists() or not plan_path.exists()):
-        raise SystemExit(
-            "grill-storm planning docs are not initialized; run "
-            "workflow/init_grill_docs.py --project-dir <project> --request <request> before execution."
-        )
+        emit_blocked_payload(missing_default_docs_payload(project_dir))
 
     if not spec_path.exists():
         raise SystemExit(f"Spec not found: {spec_path}")
@@ -178,7 +219,7 @@ def require_planning_inputs_ready(project_dir: Path, spec_path: Path, plan_path:
         detail = str(error)
         if status:
             detail = f"{detail}\ngrill-storm status: {status}"
-        raise SystemExit(detail) from error
+        emit_blocked_payload(planning_not_ready_payload(project_dir, detail))
 
 
 
@@ -259,6 +300,10 @@ def validate_installed_hook_config(settings_path: Path, run_root_arg: str, state
         )
 
 
+def hook_install_changed(settings: dict) -> bool:
+    return bool(settings.get(HOOK_RESULT_KEY, {}).get("changed", False))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Classify and prepare a claude-yolo-until-done run before execution.")
     parser.add_argument("--project-dir", required=True, help="Target project directory")
@@ -296,10 +341,10 @@ def main() -> int:
     bridge_path = Path(__file__).resolve().parent / "claude_hook_bridge.py"
     python_exe = Path(sys.executable).resolve()
 
+    classification = classify_run(run_root, args.run_root)
     require_planning_inputs_ready(project_dir, spec_path, plan_path, planning_source)
 
     runtime = verify_runtime()
-    classification = classify_run(run_root)
     try:
         dialogue_language = detect_dialogue_language(args.dialogue_language, args.latest_user_request)
     except ValueError as error:
@@ -322,7 +367,12 @@ def main() -> int:
         persist_hook_config_hash(run_root, installed_hook_config_hash(settings, args.run_root))
         payload = {
             "classification": classification,
-            "action": "bootstrapped_and_installed",
+            "action": "bootstrap_execution",
+            "current_state": "Execution run is bootstrapped and hooks are installed.",
+            "evidence": f"{bootstrap_summary['state_path']} and {bootstrap_summary['trace_path']}",
+            "blocked_on": "",
+            "next": "Dispatch worker for the current approved spec/plan execution unit.",
+            "hook_install_changed": hook_install_changed(settings),
             "run_root": bootstrap_summary["run_root"],
             "state_path": bootstrap_summary["state_path"],
             "trace_path": bootstrap_summary["trace_path"],
@@ -342,6 +392,9 @@ def main() -> int:
     expected_version = require_state_version(state)
     validate_continue_run_paths(state, project_dir, spec_path, plan_path)
     validate_continue_run_mode(state, args.mode, requested_loop)
+    unit_problem = loop_execution_unit_problem(state)
+    if unit_problem:
+        raise SystemExit(f"Continue-run invalid loop execution unit: {unit_problem}")
     if args.dialogue_language:
         requested_language = dialogue_language.get("language", "")
         existing_language = state.get("dialogue_language") if isinstance(state.get("dialogue_language"), dict) else {}
@@ -384,7 +437,12 @@ def main() -> int:
         )
     payload = {
         "classification": classification,
-        "action": "validated_and_installed",
+        "action": "resume_execution",
+        "current_state": "Existing execution run is validated and hooks are installed.",
+        "evidence": str(state_path(run_root)),
+        "blocked_on": "",
+        "next": f"Continue with {state.get('owner')} action {state.get('next_action')}.",
+        "hook_install_changed": hook_install_changed(settings),
         "run_root": str(run_root),
         "state_status": state.get("status"),
         "owner": state.get("owner"),

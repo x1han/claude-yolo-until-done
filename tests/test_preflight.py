@@ -126,6 +126,37 @@ class PreflightTest(unittest.TestCase):
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
         return env
 
+    def run_default_preflight(
+        self,
+        project_dir: Path,
+        *,
+        goal: str,
+        success_criteria: list[str] | None = None,
+        extra_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        command = [
+            sys.executable,
+            str(PREFLIGHT_PATH),
+            "--project-dir",
+            str(project_dir),
+            "--run-root",
+            ".yolo",
+            "--goal",
+            goal,
+        ]
+        for criterion in success_criteria or []:
+            command.extend(["--success-criterion", criterion])
+        command.extend(extra_args or [])
+        return subprocess.run(
+            command,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=self.runtime_env(project_dir) if env is None else env,
+        )
+
     def run_preflight(
         self,
         project_dir: Path,
@@ -249,7 +280,7 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["classification"], "new_run")
-            self.assertEqual(payload["action"], "bootstrapped_and_installed")
+            self.assertEqual(payload["action"], "bootstrap_execution")
             self.assertEqual(payload["checklist_path"], str(project_dir / ".yolo" / "watcher_checklist.json"))
             self.assertTrue((project_dir / ".yolo" / "state.json").exists())
             self.assertTrue((project_dir / ".yolo" / "trace.md").exists())
@@ -265,6 +296,50 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(state["state_version"], 2)
             self.assertEqual(state["last_transition_actor"], "preflight")
             self.assertEqual(state["last_transition_id"], "preflight:persist_hook_config_hash:2")
+
+    def test_preflight_success_payload_includes_operator_report_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            result = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap with report fields.")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["current_state"], "Execution run is bootstrapped and hooks are installed.")
+            self.assertIn("state.json", payload["evidence"])
+            self.assertEqual(payload["blocked_on"], "")
+            self.assertEqual(payload["next"], "Dispatch worker for the current approved spec/plan execution unit.")
+            joined = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("according to skill", joined.lower())
+            self.assertNotIn("I must follow", joined)
+
+            continue_result = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap with report fields.")
+
+            self.assertEqual(continue_result.returncode, 0, continue_result.stderr)
+            continue_payload = json.loads(continue_result.stdout)
+            self.assertEqual(continue_payload["current_state"], "Existing execution run is validated and hooks are installed.")
+            self.assertIn("state.json", continue_payload["evidence"])
+            self.assertEqual(continue_payload["blocked_on"], "")
+            self.assertEqual(continue_payload["next"], "Continue with worker action worker_update.")
+
+    def test_continue_preflight_reports_unchanged_hook_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+
+            first = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap hooks.")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            second = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap hooks.")
+            self.assertEqual(second.returncode, 0, second.stderr)
+            payload = json.loads(second.stdout)
+            self.assertFalse(payload["hook_install_changed"])
 
     def test_preflight_defaults_new_run_to_acyclic_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,6 +521,46 @@ class PreflightTest(unittest.TestCase):
             self.assertNotEqual(second.returncode, 0)
             self.assertIn("Continue-run mismatch: loop policy does not match existing run bundle", second.stderr)
 
+    def test_preflight_rejects_loop_continue_run_when_task_inputs_point_at_plan_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec_path = project_dir / "spec.md"
+            plan_path = project_dir / "plan.md"
+            run_root = project_dir / ".yolo"
+            spec_path.write_text("# Spec\n", encoding="utf-8")
+            plan_path.write_text(
+                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                encoding="utf-8",
+            )
+            first = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Create loop bundle.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "2"],
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            state_path = run_root / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            plan_section = state["task_inputs"]["plan_sections"][0]
+            state["task_id"] = plan_section["task_id"]
+            state["task_title"] = plan_section["task_title"]
+            state["task_inputs"] = plan_section
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+            second = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Reject section-level loop resume.",
+                extra_args=["--mode", "loop", "--loop-max-iterations", "2"],
+            )
+
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("Continue-run invalid loop execution unit", second.stderr)
+            self.assertIn("points at a plan section", second.stderr)
+
     def test_preflight_classifies_continue_run_when_bundle_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
@@ -493,10 +608,10 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["classification"], "continue_run")
-            self.assertEqual(payload["action"], "validated_and_installed")
+            self.assertEqual(payload["action"], "resume_execution")
             self.assertEqual(payload["state_status"], "active")
 
-    def test_preflight_classifies_continue_run_from_state_when_trace_is_missing(self) -> None:
+    def test_preflight_reports_repair_state_when_state_exists_without_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
@@ -515,36 +630,67 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(initial.returncode, 0, initial.stderr)
             (run_root / "trace.md").unlink(missing_ok=True)
 
-            env = self.runtime_env(project_dir)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(PREFLIGHT_PATH),
-                    "--project-dir",
-                    str(project_dir),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    ".yolo",
-                    "--goal",
-                    "Resume an existing run.",
-                    "--success-criterion",
-                    "bundle already exists.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Resume an existing run.",
+                success_criteria=["bundle already exists."],
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["classification"], "continue_run")
-            self.assertEqual(payload["action"], "validated_and_installed")
+            self.assertEqual(payload["classification"], "invalid_run")
+            self.assertEqual(payload["action"], "repair_state")
+            self.assertEqual(payload["blocked_on"], ".yolo/state.json exists without .yolo/trace.md")
+
+    def test_preflight_reports_init_planning_when_default_docs_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Run from default planning docs.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "init_planning")
+            self.assertEqual(payload["current_state"], "Default grill-storm planning docs are missing.")
+            self.assertEqual(payload["blocked_on"], "docs/intent.md docs/open-questions.md docs/decisions.md docs/spec.md docs/plan.md")
+            self.assertIn("workflow/init_grill_docs.py", payload["next"])
+            self.assertTrue(payload["human_required"])
+
+    def test_preflight_reports_repair_state_when_trace_exists_without_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = project_dir / "docs"
+            run_root = project_dir / ".yolo"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "intent.md").write_text("# Intent\n", encoding="utf-8")
+            (docs_dir / "open-questions.md").write_text("# Open Questions\n", encoding="utf-8")
+            (docs_dir / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+            (docs_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+            (docs_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            run_root.mkdir(parents=True, exist_ok=True)
+            (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Reject mixed state.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "invalid_run")
+            self.assertEqual(payload["action"], "repair_state")
+            self.assertEqual(payload["blocked_on"], ".yolo/trace.md exists without .yolo/state.json")
+            self.assertIn("safe next step", payload["next"].lower())
+            self.assertTrue(payload["human_required"])
 
     def test_continue_run_rebuilds_missing_checklist_from_authoritative_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -716,7 +862,7 @@ class PreflightTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["classification"], "continue_run")
-            self.assertEqual(payload["action"], "validated_and_installed")
+            self.assertEqual(payload["action"], "resume_execution")
 
             rebuilt = json.loads(checklist_path.read_text(encoding="utf-8"))
             persisted_state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -972,35 +1118,20 @@ class PreflightTest(unittest.TestCase):
             run_root.mkdir(parents=True, exist_ok=True)
             (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
 
-            env = self.runtime_env(project_dir)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(PREFLIGHT_PATH),
-                    "--project-dir",
-                    str(project_dir),
-                    "--spec",
-                    str(spec_path),
-                    "--plan",
-                    str(plan_path),
-                    "--run-root",
-                    ".yolo",
-                    "--goal",
-                    "Reject mixed state.",
-                    "--success-criterion",
-                    "mixed bundle fails closed.",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
+            result = self.run_preflight(
+                project_dir,
+                spec_path,
+                plan_path,
+                goal="Reject mixed state.",
+                success_criteria=["mixed bundle fails closed."],
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("mixed run bundle state", result.stderr.lower())
-            self.assertIn("trace.md exists without authoritative state.json", result.stderr)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "invalid_run")
+            self.assertEqual(payload["action"], "repair_state")
+            self.assertEqual(payload["blocked_on"], ".yolo/trace.md exists without .yolo/state.json")
 
     def test_continue_run_requeues_expired_dispatch_claim_after_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

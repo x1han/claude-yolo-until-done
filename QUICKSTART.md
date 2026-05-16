@@ -23,6 +23,8 @@ Do not start execution until grill-storm loop has produced:
 
 This workflow still keeps execution and planning separate.
 
+Preflight reports one explicit operator action: `init_planning`, `continue_planning`, `await_human_approval`, `bootstrap_execution`, `resume_execution`, or `repair_state`. Each blocked report includes current state, evidence, blocked-on item, and next safe action.
+
 ## 3. Run Preflight
 
 From output folder:
@@ -38,6 +40,8 @@ python <skill-repo>/workflow/preflight.py \
 ```
 
 Default is acyclic mode: execute the approved spec/plan once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit. fixed loop N means N complete acyclic executions; convergence-only loop uses default max 10. do not pre-plan future loop iterations.
+
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
 
 For loop mode, preflight with a stop policy:
 

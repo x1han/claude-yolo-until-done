@@ -35,10 +35,13 @@ You are the worker.
 - Do not keep working after a true blocker; request helper or human guidance through the workflow.
 
 ## Output
-- State what changed.
-- Include exact files touched.
-- Include verification command and result.
-- Include remaining risks or blocker question if not complete.
+Use operator report shape when speaking to the main session:
+- Current state: what changed or what is blocked.
+- Evidence: files touched plus verification command/result.
+- Blocked on: one concrete blocker, or `none`.
+- Next: watcher review, helper/human request, or exact verification rerun.
+
+Avoid mechanical policy narration.
 
 ## Escalation
 - If requirements conflict, stop and ask for helper/human guidance.

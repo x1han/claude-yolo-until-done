@@ -404,8 +404,12 @@ class GrillStormRuntimeTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("grill-storm planning docs are not initialized", result.stderr)
-            self.assertIn("workflow/init_grill_docs.py", result.stderr)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "init_planning")
+            self.assertEqual(payload["current_state"], "Default grill-storm planning docs are missing.")
+            self.assertIn("workflow/init_grill_docs.py", payload["next"])
             self.assertFalse((project_dir / ".yolo" / "state.json").exists())
 
     def test_preflight_without_spec_plan_reports_grill_storm_status_for_draft_docs(self) -> None:
@@ -447,8 +451,12 @@ class GrillStormRuntimeTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
-            self.assertIn("next_actor", result.stderr)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "continue_planning")
+            self.assertIn("grill-storm planning docs are not execution-ready", payload["blocked_on"])
+            self.assertIn("next_actor", payload["blocked_on"])
             self.assertFalse((project_dir / ".yolo" / "state.json").exists())
 
     def test_preflight_explicit_default_docs_paths_still_require_grill_validation(self) -> None:
