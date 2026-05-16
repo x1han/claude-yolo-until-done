@@ -9,7 +9,7 @@ Preflight reports one explicit operator action: `init_planning`, `continue_plann
 A new run requires all of following:
 
 - default path: approved grill-storm docs under `docs/spec.md` and `docs/plan.md`, plus `docs/intent.md`, `docs/open-questions.md`, and `docs/decisions.md`
-- override path: both `--spec` and `--plan` point to existing approved planning artifacts
+- override path: both `--spec` and `--plan` point to existing approved, execution-ready planning artifacts; draft or incomplete artifacts return `continue_planning`
 - no existing durable run bundle at `<run-root>/state.json` and `<run-root>/trace.md`
 
 In this branch, preflight should bootstrap run root before ordinary execution continues.

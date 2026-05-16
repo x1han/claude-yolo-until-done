@@ -282,7 +282,17 @@ class GrillStormLoopTest(unittest.TestCase):
             }
 
             record_result = subprocess.run(
-                [sys.executable, str(GRILL_STORM_LOOP_PATH), "record", "--result-json", json.dumps(result_payload)],
+                [
+                    sys.executable,
+                    str(GRILL_STORM_LOOP_PATH),
+                    "record",
+                    "--project-dir",
+                    str(project_dir),
+                    "--run-root",
+                    str(project_dir / ".yolo"),
+                    "--result-json",
+                    json.dumps(result_payload),
+                ],
                 cwd=project_dir,
                 capture_output=True,
                 text=True,

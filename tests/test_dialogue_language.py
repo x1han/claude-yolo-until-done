@@ -38,8 +38,11 @@ class DialogueLanguageTest(unittest.TestCase):
     def run_preflight(self, project_dir: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
         spec_path = project_dir / "spec.md"
         plan_path = project_dir / "plan.md"
-        spec_path.write_text("# Spec\n", encoding="utf-8")
-        plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+        spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Dialogue language is stored.\n", encoding="utf-8")
+        plan_path.write_text(
+            "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_dialogue_language.py'\nExpected: PASS\nVerify: dialogue language state is persisted.\n\n## Rollback / Safety\n- Revert preflight language handling.\n",
+            encoding="utf-8",
+        )
         return subprocess.run(
             [
                 sys.executable,

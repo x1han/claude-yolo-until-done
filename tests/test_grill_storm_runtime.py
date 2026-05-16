@@ -502,7 +502,11 @@ class GrillStormRuntimeTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "continue_planning")
+            self.assertIn("grill-storm planning docs are not execution-ready", payload["blocked_on"])
 
     def test_preflight_rejects_new_run_when_grill_docs_are_not_execution_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -545,7 +549,11 @@ class GrillStormRuntimeTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("grill-storm planning docs are not execution-ready", result.stderr)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "continue_planning")
+            self.assertIn("grill-storm planning docs are not execution-ready", payload["blocked_on"])
 
     def test_validate_grill_docs_requires_human_consensus_spec_and_plan_approvals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

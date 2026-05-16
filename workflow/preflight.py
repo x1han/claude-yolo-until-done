@@ -14,7 +14,7 @@ from hook_settings import HOOK_RESULT_KEY, install_hook_set, installed_hook_conf
 from loop_scheduler import loop_execution_unit_problem
 from orchestrator import recover_dispatch_for_resume
 from state import append_trace_event, build_current_task_view, build_loop_state, detect_dialogue_language, load_json, load_state, serialize_path, state_path, trace_path, transition_state, write_json
-from validate_grill_docs import GrillDocsError, ensure_ready_for_execution
+from validate_grill_docs import GrillDocsError, ensure_ready_for_execution, has_template_only_lines, plan_quality_errors, status_value
 
 
 ACTIVE_ENTRYPOINT = "cli"
@@ -114,14 +114,39 @@ def load_current_checklist_task(checklist_path: Path, state: dict) -> dict:
     return checklist.get("current_task", {})
 
 
-def validate_grill_storm_bundle_if_present(project_dir: Path, spec_path: Path, plan_path: Path) -> None:
+def is_default_grill_storm_bundle(project_dir: Path, spec_path: Path, plan_path: Path) -> bool:
     docs_root = (project_dir / "docs").resolve()
-    if spec_path != (docs_root / "spec.md").resolve() or plan_path != (docs_root / "plan.md").resolve():
-        return
+    return spec_path == (docs_root / "spec.md").resolve() and plan_path == (docs_root / "plan.md").resolve()
+
+
+
+def validate_grill_storm_bundle(project_dir: Path) -> None:
     try:
         ensure_ready_for_execution(project_dir, "docs")
     except GrillDocsError as error:
         raise SystemExit(f"grill-storm planning docs are not execution-ready: {error}") from error
+
+
+
+def validate_explicit_planning_artifacts(spec_path: Path, plan_path: Path) -> None:
+    spec_text = spec_path.read_text(encoding="utf-8")
+    plan_text = plan_path.read_text(encoding="utf-8")
+    errors: list[str] = []
+    if status_value(spec_text) != "approved":
+        errors.append("explicit spec is not approved")
+    if status_value(plan_text) != "approved":
+        errors.append("explicit plan is not approved")
+    if has_template_only_lines(spec_text):
+        errors.append("explicit spec contains template-only placeholders")
+    if has_template_only_lines(plan_text):
+        errors.append("explicit plan contains template-only placeholders")
+    if "## Acceptance Criteria" not in spec_text:
+        errors.append("explicit spec is missing acceptance criteria")
+    if "## Steps" not in plan_text:
+        errors.append("explicit plan is missing implementation steps")
+    errors.extend(f"explicit {error}" for error in plan_quality_errors(plan_text))
+    if errors:
+        raise SystemExit("explicit spec/plan are not execution-ready: " + "; ".join(errors))
 
 
 
@@ -211,11 +236,12 @@ def require_planning_inputs_ready(project_dir: Path, spec_path: Path, plan_path:
         raise SystemExit(f"Plan not found: {plan_path}")
 
     try:
-        validate_grill_storm_bundle_if_present(project_dir, spec_path, plan_path)
+        if planning_source == "grill-storm" or is_default_grill_storm_bundle(project_dir, spec_path, plan_path):
+            validate_grill_storm_bundle(project_dir)
+        else:
+            validate_explicit_planning_artifacts(spec_path, plan_path)
     except SystemExit as error:
-        if planning_source != "grill-storm":
-            raise
-        status = grill_storm_status_text(project_dir)
+        status = grill_storm_status_text(project_dir) if planning_source == "grill-storm" else ""
         detail = str(error)
         if status:
             detail = f"{detail}\ngrill-storm status: {status}"

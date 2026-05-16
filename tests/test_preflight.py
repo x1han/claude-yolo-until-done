@@ -70,7 +70,7 @@ class ChecklistBootstrapTest(unittest.TestCase):
             spec_path = root / "spec.md"
             plan_path = root / "plan.md"
             run_root = root / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
                 "# Plan\n\n## Overview\n1. Gather prerequisites\n\n## Tasks\n1. Tighten stop hook\n2. Add orchestrator routing\n",
                 encoding="utf-8",
@@ -200,8 +200,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             settings_path = project_dir / ".claude" / "settings.local.json"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.write_text(
                 json.dumps(
@@ -302,8 +302,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             result = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap with report fields.")
 
@@ -331,8 +331,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             first = self.run_preflight(project_dir, spec_path, plan_path, goal="Bootstrap hooks.")
             self.assertEqual(first.returncode, 0, first.stderr)
@@ -346,8 +346,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             result = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -378,8 +378,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             result = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -401,8 +401,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             result = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -429,8 +429,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             result = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -454,8 +454,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             result = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -472,8 +472,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             first = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -499,8 +499,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             first = self.run_preflight(
                 project_dir,
                 spec_path,
@@ -527,9 +527,9 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n### Task 2: Advance the durable task state\nFiles: workflow/state.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: durable state advances.\n\n## Rollback / Safety\n- Revert preflight changes.\n",
                 encoding="utf-8",
             )
             first = self.run_preflight(
@@ -567,8 +567,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -617,8 +617,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -698,8 +698,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -751,9 +751,9 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n### Task 2: Advance the durable task state\nFiles: workflow/state.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: durable state advances.\n\n## Rollback / Safety\n- Revert preflight changes.\n",
                 encoding="utf-8",
             )
 
@@ -812,9 +812,9 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n### Task 2: Advance the durable task state\nFiles: workflow/state.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: durable state advances.\n\n## Rollback / Safety\n- Revert preflight changes.\n",
                 encoding="utf-8",
             )
 
@@ -877,9 +877,9 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n### Task 2: Advance the durable task state\nFiles: workflow/state.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: durable state advances.\n\n## Rollback / Safety\n- Revert preflight changes.\n",
                 encoding="utf-8",
             )
 
@@ -936,8 +936,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -989,9 +989,9 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan_path.write_text(
-                "# Plan\n\n### Task 1: Keep the run bundle consistent\n\n### Task 2: Advance the durable task state\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n### Task 2: Advance the durable task state\nFiles: workflow/state.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: durable state advances.\n\n## Rollback / Safety\n- Revert preflight changes.\n",
                 encoding="utf-8",
             )
 
@@ -1063,9 +1063,9 @@ class PreflightTest(unittest.TestCase):
             other_spec_path = project_dir / "other-spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            other_spec_path.write_text("# Other spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            other_spec_path.write_text("# Other spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -1113,8 +1113,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
             run_root.mkdir(parents=True, exist_ok=True)
             (run_root / "trace.md").write_text("# trace\n", encoding="utf-8")
 
@@ -1139,8 +1139,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -1204,8 +1204,8 @@ class PreflightTest(unittest.TestCase):
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
             settings_path = project_dir / ".claude" / "settings.local.json"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -1276,8 +1276,8 @@ class PreflightTest(unittest.TestCase):
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
             settings_path = project_dir / ".claude" / "settings.local.json"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -1351,8 +1351,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             env = self.runtime_env(project_dir, "123 claude")
 
@@ -1390,8 +1390,8 @@ class PreflightTest(unittest.TestCase):
             project_dir = Path(tmp)
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             env = self.runtime_env(project_dir, "123 claude")
             env["CLAUDE_YOLO_PROCESS_CHAIN"] = "123 claude --dangerously-skip-permissions"
@@ -1431,8 +1431,8 @@ class PreflightTest(unittest.TestCase):
             spec_path = project_dir / "spec.md"
             plan_path = project_dir / "plan.md"
             run_root = project_dir / ".yolo"
-            spec_path.write_text("# Spec\n", encoding="utf-8")
-            plan_path.write_text("# Plan\n\n### Task 1: Keep the run bundle consistent\n", encoding="utf-8")
+            spec_path.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            plan_path.write_text("# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Keep the run bundle consistent\nFiles: workflow/preflight.py\nRun: python -m unittest discover -s repo/tests -p 'test_preflight.py'\nExpected: PASS\nVerify: preflight accepts approved explicit planning artifacts.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
 
             initial = self.run_preflight(
                 project_dir,
@@ -1464,7 +1464,7 @@ class PreflightTest(unittest.TestCase):
             plan = project_dir / "external-plan.md"
             spec.write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
             plan.write_text(
-                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Review changes\nInspect changes.\n\nVerify: reviewer records evidence.\n",
+                "# Plan\n\nStatus: approved\n\n## Steps\n\n### Task 1: Review changes\nFiles: .\nRun: python -m unittest discover -s tests -p 'test_*.py'\nExpected: PASS\nVerify: reviewer records evidence.\n\n## Rollback / Safety\n- Revert reviewed changes.\n",
                 encoding="utf-8",
             )
 
@@ -1496,6 +1496,30 @@ class PreflightTest(unittest.TestCase):
             state = json.loads((project_dir / ".yolo" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["spec_path"], "external-spec.md")
             self.assertEqual(state["plan_path"], "external-plan.md")
+
+    def test_preflight_rejects_explicit_draft_spec_plan_with_planning_needed_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            spec = project_dir / "external-spec.md"
+            plan = project_dir / "external-plan.md"
+            spec.write_text("# Spec\n\nStatus: draft\n", encoding="utf-8")
+            plan.write_text("# Plan\n\nStatus: draft\n", encoding="utf-8")
+
+            result = self.run_preflight(
+                project_dir,
+                spec,
+                plan,
+                goal="Reject draft external artifacts.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "continue_planning")
+            self.assertIn("explicit spec/plan are not execution-ready", payload["blocked_on"])
+            self.assertIn("continue skills/grill-storm planning", payload["next"].lower())
+            self.assertFalse((project_dir / ".yolo" / "state.json").exists())
 
     def test_preflight_rejects_only_spec_without_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

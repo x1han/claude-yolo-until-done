@@ -86,7 +86,7 @@ Preflight reports one explicit operator action: `init_planning`, `continue_plann
 
 Default new-run startup uses first-party grill-storm docs under `<project>/docs/`. Run `workflow/init_grill_docs.py` when those docs do not exist, iterate with `workflow/grill_storm_loop.py` until `docs/spec.md` and `docs/plan.md` are approved, then run `workflow/preflight.py` without `--spec/--plan` to execute the default docs.
 
-Existing approved spec/plan files are still supported by passing both `--spec` and `--plan`.
+Existing approved spec/plan files are still supported by passing both `--spec` and `--plan`; draft or incomplete explicit artifacts return `continue_planning` before any execution bootstrap.
 
 From target project root:
 

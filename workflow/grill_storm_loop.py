@@ -223,6 +223,8 @@ def parse_args() -> argparse.Namespace:
     next_parser.add_argument("--max-rounds", type=int, default=6, help="Maximum internal planning rounds")
 
     record_parser = subparsers.add_parser("record", help="Record a completed planning agent round")
+    record_parser.add_argument("--project-dir", default="", help="Accepted for command symmetry with next; dispatch_request remains authoritative")
+    record_parser.add_argument("--run-root", default="", help="Accepted for command symmetry with next; dispatch_request remains authoritative")
     record_parser.add_argument("--result-json", required=True, help="JSON object with dispatch_request and round_result")
     return parser.parse_args()
 

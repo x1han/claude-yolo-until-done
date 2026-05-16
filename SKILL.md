@@ -42,7 +42,7 @@ Preflight reports one explicit operator action: `init_planning`, `continue_plann
 - human-approved spec and human-approved plan are required: record `Source: spec-review` before plan authoring and `Source: plan-review` before execution.
 - New run default: approved grill-storm docs exist under `docs/spec.md` and `docs/plan.md`, pass `workflow/validate_grill_docs.py`, and `.yolo/` does not yet exist. preflight should bootstrap run root first, then install current local hook set, then continue execution.
 - New run override: both `--spec` and `--plan` point to existing approved planning artifacts outside the default grill-storm docs.
-- Planning-needed run: if default grill-storm docs are missing or draft, stop before bootstrap and report the planning action needed.
+- Planning-needed run: if default grill-storm docs are missing or draft, or explicit `--spec`/`--plan` artifacts are draft/incomplete, stop before bootstrap and report the planning action needed.
 - Continue run: `.yolo/state.json` and `.yolo/trace.md` already exist. preflight should verify them, reinstall current local hook set if needed, and resume from durable state.
 - Invalid run: if skill lacks either approved planning artifacts for new run, or coherent durable state for continue-run path, it must fail closed and stop.
 - Legacy local hook settings are not blocker for new run. Install step is idempotent and should replace same-run claude-yolo hook groups with current contract.
