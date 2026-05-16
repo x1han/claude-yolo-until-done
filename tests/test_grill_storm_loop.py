@@ -88,8 +88,9 @@ class GrillStormLoopTest(unittest.TestCase):
                 },
             )
 
-            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-11 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: User wants safe planning.\n"
-            self.write_docs(project_dir, decisions=decisions)
+            decisions = (project_dir / "docs" / "decisions.md").read_text(encoding="utf-8")
+            self.assertIn("- Actor: muse", decisions)
+            self.assertIn("- Decision: User wants safe planning.", decisions)
 
             dispatch2 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
             self.assertEqual(dispatch2["role"], "logos")
@@ -236,6 +237,69 @@ class GrillStormLoopTest(unittest.TestCase):
             self.assertEqual(persisted["role"], "muse")
             rounds = load_planning_rounds(project_dir / ".yolo")
             self.assertEqual(rounds[0]["summary"], "Recorded preflight ownership decision.")
+
+    def test_blocked_round_does_not_count_as_internal_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(project_dir)
+            run_root = project_dir / ".yolo"
+            dispatch1 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
+
+            from grill_storm_loop import record_round_result
+            record_round_result(
+                dispatch1,
+                {
+                    "role": "muse",
+                    "round": 1,
+                    "status": "blocked",
+                    "docs_touched": ["docs/open-questions.md"],
+                    "summary": "Muse could not decide.",
+                    "decisions_recorded": ["Potential direction is not ready."],
+                    "questions_added": ["Need operator input."],
+                    "next_recommendation": "Retry Muse after input.",
+                },
+            )
+
+            decisions = (project_dir / "docs" / "decisions.md").read_text(encoding="utf-8")
+            self.assertNotIn("Potential direction is not ready.", decisions)
+            dispatch2 = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
+            self.assertEqual(dispatch2["role"], "muse")
+            self.assertEqual(dispatch2["round"], 2)
+
+    def test_recorded_spec_self_review_round_unblocks_human_spec_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            decisions = "# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n"
+            self.write_docs(project_dir, decisions=decisions)
+            self.write_human_approvals(project_dir, "consensus")
+            spec_text = "# Spec\n\nStatus: draft\n\n## Problem\nNeed durable planning docs.\n\n## Acceptance Criteria\n- Docs converge.\n"
+            (project_dir / "docs" / "spec.md").write_text(spec_text, encoding="utf-8")
+            run_root = project_dir / ".yolo"
+            dispatch = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
+            self.assertEqual(dispatch["planning_mode"], "logos-spec-reviewer")
+
+            from grill_storm_loop import record_round_result
+            record_round_result(
+                dispatch,
+                {
+                    "role": "logos",
+                    "round": dispatch["round"],
+                    "status": "completed",
+                    "docs_touched": ["docs/decisions.md"],
+                    "summary": "Spec self-review passed.",
+                    "decisions_recorded": ["Spec has clear problem and acceptance criteria."],
+                    "questions_added": [],
+                    "next_recommendation": "Ask human to approve spec.",
+                },
+                now="2026-05-12T00:00:00+00:00",
+            )
+
+            body = (project_dir / "docs" / "decisions.md").read_text(encoding="utf-8")
+            self.assertIn("- Source: spec-self-review", body)
+            self.assertNotIn("- Source: spec-review", body)
+            (project_dir / "docs" / "spec.md").write_text(spec_text.replace("Status: draft", "Status: self-reviewed"), encoding="utf-8")
+            payload = run_planning_step(project_dir, run_root=run_root)
+            self.assertEqual(payload["status"], "human_spec_review")
 
     def test_cli_next_outputs_dispatch_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -23,6 +23,7 @@ REQUIRED_OUTPUT_SCHEMA = {
 }
 
 DISPATCHABLE_STATUSES = {"needs_internal_round", "needs_spec_authoring", "needs_spec_self_review", "needs_plan_authoring"}
+DECISION_SOURCE_BY_PLANNING_MODE = {"logos-spec-reviewer": "spec-self-review"}
 
 
 def build_agent_prompt(dispatch: dict) -> str:
@@ -182,12 +183,56 @@ def validate_round_result(dispatch: dict, result: dict) -> dict:
     }
 
 
+def decisions_doc_path(dispatch: dict) -> Path:
+    project_dir = Path(str(dispatch.get("project_dir", ""))).resolve()
+    docs_dir = Path(str(dispatch.get("docs_dir", "docs")))
+    if not docs_dir.is_absolute():
+        docs_dir = project_dir / docs_dir
+    return docs_dir / "decisions.md"
+
+
+def decision_source_for_dispatch(dispatch: dict) -> str:
+    return DECISION_SOURCE_BY_PLANNING_MODE.get(str(dispatch.get("planning_mode", "")), "")
+
+
+def append_recorded_decisions(dispatch: dict, record: dict) -> None:
+    if record.get("status") != "completed":
+        return
+    decisions = [str(decision).strip() for decision in record.get("decisions_recorded", []) if str(decision).strip()]
+    if not decisions:
+        return
+    path = decisions_doc_path(dispatch)
+    body = path.read_text(encoding="utf-8") if path.exists() else "# Decisions\n\n## Decision Log\n"
+    decisions = [decision for decision in decisions if decision not in body]
+    if not decisions:
+        return
+    date = str(record.get("recorded_at", "")).split("T", 1)[0] or "unknown-date"
+    role = str(record["role"])
+    title = f"{role.title()} round {record['round']}"
+    source = decision_source_for_dispatch(dispatch)
+    lines = [
+        "",
+        f"### {date} - {title}",
+        "- Status: accepted",
+        f"- Actor: {role}",
+    ]
+    if source:
+        lines.append(f"- Source: {source}")
+    lines.extend([
+        f"- Decision: {'; '.join(decisions)}",
+        "",
+    ])
+    path.write_text(body.rstrip() + "\n" + "\n".join(lines), encoding="utf-8")
+
+
 def record_round_result(dispatch: dict, result: dict, now: str | None = None) -> dict:
     run_root = str(dispatch.get("run_root", ""))
     if not run_root:
         raise ValueError("Dispatch request has no run_root for round recording")
     validated = validate_round_result(dispatch, result)
-    return append_planning_round(Path(run_root), validated, now=now)
+    record = append_planning_round(Path(run_root), validated, now=now)
+    append_recorded_decisions(dispatch, record)
+    return record
 
 
 def run_planning_step(project_dir: Path, *, run_root: Path | None = None, docs_dir_arg: str = "docs", max_rounds: int = 6) -> dict:
