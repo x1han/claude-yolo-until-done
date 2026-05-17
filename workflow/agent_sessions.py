@@ -253,6 +253,9 @@ def append_planning_round(run_root: Path, record: dict, now: str | None = None) 
         "next_recommendation": str(record.get("next_recommendation", "")).strip(),
     }
     rounds = load_planning_rounds(run_root)
+    for existing in rounds:
+        if existing.get("role") == role and existing.get("round") == round_number:
+            return existing
     rounds.append(persisted)
     write_planning_rounds(run_root, rounds)
     append_role_log_entry(

@@ -765,7 +765,39 @@ class GrillStormRuntimeTest(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "human_spec_review")
             self.assertTrue(payload["human_allowed"])
+            self.assertEqual(payload["artifact_path"], "docs/spec.md")
             self.assertIn("docs/spec.md", payload["review"])
+            self.assertIn("Spec path: docs/spec.md", payload["review"])
+            self.assertIn("Simple summary:", payload["review"])
+            self.assertIn("Review spec before plan authoring.", payload["review"])
+
+    def test_grill_storm_human_review_reports_custom_docs_dir_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = self.write_docs(
+                project_dir,
+                spec_status="self-reviewed",
+                open_questions="# Open Questions\n\n## High Priority\n- [ ] None.\n",
+                decisions="# Decisions\n\n## Decision Log\n\n### 2026-05-12 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-12 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos converged approach.\n\n### 2026-05-12 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build human-gated planning.\n\n### 2026-05-12 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec passes self-review.\n",
+            )
+            custom_docs = project_dir / "planning"
+            docs_dir.rename(custom_docs)
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True, exist_ok=True)
+            (run_root / "human_approvals.json").write_text('[{"source":"consensus","answer":"approved consensus","recorded_by":"main-session"}]\n', encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(GRILL_STORM_PATH), "--project-dir", str(project_dir), "--docs-dir", "planning", "--status"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "human_spec_review")
+            self.assertEqual(payload["artifact_path"], "planning/spec.md")
+            self.assertIn("Spec path: planning/spec.md", payload["review"])
 
     def test_grill_storm_requests_plan_authoring_after_human_spec_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -819,7 +851,11 @@ class GrillStormRuntimeTest(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "human_plan_review")
             self.assertTrue(payload["human_allowed"])
+            self.assertEqual(payload["artifact_path"], "docs/plan.md")
             self.assertIn("docs/plan.md", payload["review"])
+            self.assertIn("Plan path: docs/plan.md", payload["review"])
+            self.assertIn("Simple summary:", payload["review"])
+            self.assertIn("Review plan before execution.", payload["review"])
 
 
 if __name__ == "__main__":

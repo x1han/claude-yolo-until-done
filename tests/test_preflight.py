@@ -664,6 +664,111 @@ class PreflightTest(unittest.TestCase):
             self.assertIn("workflow/init_grill_docs.py", payload["next"])
             self.assertTrue(payload["human_required"])
 
+    def test_preflight_reports_await_human_approval_for_unapproved_default_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = project_dir / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "intent.md").write_text("# Intent\n\n## Primary Goal\n- Run approved work.\n", encoding="utf-8")
+            (docs_dir / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n", encoding="utf-8")
+            (docs_dir / "decisions.md").write_text("# Decisions\n\n## Decision Log\n\n### 2026-05-16 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-16 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos checked feasibility.\n\n### 2026-05-16 - Consensus candidate\n- Status: accepted\n- Actor: logos\n- Source: consensus-candidate\n- Consensus: Approval-gated execution | Summary: Execute only after verified human approvals. | Tradeoffs: Fast gate, strict approval. | Recommended: true\n\n### 2026-05-16 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved work.\n\n### 2026-05-16 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec is ready.\n\n### 2026-05-16 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-16 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n", encoding="utf-8")
+            (docs_dir / "spec.md").write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            (docs_dir / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Files: workflow/preflight.py\n   Run: python3 -m unittest discover -s repo/tests -p 'test_preflight.py'\n   Expected: PASS\n   Verify: tests pass.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Run from default planning docs.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "await_human_approval")
+            self.assertIn("not execution-ready", payload["current_state"])
+            self.assertIn("spec", payload["blocked_on"].lower())
+            self.assertIn("approval", payload["next"].lower())
+            self.assertTrue(payload["human_required"])
+
+    def test_preflight_reports_await_human_approval_for_self_reviewed_default_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = project_dir / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "intent.md").write_text("# Intent\n\n## Primary Goal\n- Run reviewed work.\n", encoding="utf-8")
+            (docs_dir / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n", encoding="utf-8")
+            (docs_dir / "decisions.md").write_text("# Decisions\n\n## Decision Log\n\n### 2026-05-16 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-16 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos checked feasibility.\n\n### 2026-05-16 - Consensus candidate\n- Status: accepted\n- Actor: logos\n- Source: consensus-candidate\n- Consensus: Approval-gated execution | Summary: Execute only after verified human approvals. | Tradeoffs: Fast gate, strict approval. | Recommended: true\n\n### 2026-05-16 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved work.\n\n### 2026-05-16 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec is ready.\n", encoding="utf-8")
+            (docs_dir / "spec.md").write_text("# Spec\n\nStatus: self-reviewed\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            (docs_dir / "plan.md").write_text("# Plan\n\nStatus: draft\n\n## Steps\n1. Step: run execution.\n   Files: workflow/preflight.py\n   Run: python3 -m unittest discover -s repo/tests -p 'test_preflight.py'\n   Expected: PASS\n   Verify: tests pass.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Run from default planning docs.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "await_human_approval")
+            self.assertIn("spec", payload["blocked_on"].lower())
+            self.assertTrue(payload["human_required"])
+
+    def test_preflight_continues_planning_for_non_human_grill_status_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = project_dir / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "intent.md").write_text("# Intent\n\n## Primary Goal\n- Run approved work.\n", encoding="utf-8")
+            (docs_dir / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n", encoding="utf-8")
+            (docs_dir / "decisions.md").write_text("# Decisions\n\n## Decision Log\n\n### 2026-05-16 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-16 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos checked feasibility.\n\n### 2026-05-16 - Consensus candidate\n- Status: accepted\n- Actor: logos\n- Source: consensus-candidate\n- Consensus: Approval-gated execution | Summary: Execute only after verified human approvals. | Tradeoffs: Fast gate, strict approval. | Recommended: true\n\n### 2026-05-16 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved work.\n\n### 2026-05-16 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec is ready.\n\n### 2026-05-16 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-16 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n", encoding="utf-8")
+            (docs_dir / "spec.md").write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True, exist_ok=True)
+            (run_root / "human_approvals.json").write_text('[{"source":"consensus","answer":"Build approved work.","recorded_by":"main-session"},{"source":"spec-review","answer":"Spec approved.","recorded_by":"main-session"},{"source":"plan-review","answer":"Plan approved.","recorded_by":"main-session"}]\n', encoding="utf-8")
+            (docs_dir / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Files: workflow/preflight.py\n   Run: python3 -m unittest discover -s repo/tests -p 'test_preflight.py'\n   Expected: PASS\n   Verify: tests pass.\n\nTODO remove before approval.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Run from default planning docs.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "continue_planning")
+            self.assertIn("todo", payload["blocked_on"].lower())
+            self.assertFalse(payload["human_required"])
+
+    def test_preflight_marks_human_required_for_ask_user_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            docs_dir = project_dir / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "intent.md").write_text("# Intent\n\n## Primary Goal\n- Run approved work.\n", encoding="utf-8")
+            (docs_dir / "open-questions.md").write_text("# Open Questions\n\n## High Priority\n- [ ] Blocking: yes | Question: Which boundary wins? | Recommended: Preflight owns gate.\n", encoding="utf-8")
+            (docs_dir / "decisions.md").write_text("# Decisions\n\n## Decision Log\n\n### 2026-05-16 - Muse\n- Status: accepted\n- Actor: muse\n- Decision: Muse explored intent.\n\n### 2026-05-16 - Logos\n- Status: accepted\n- Actor: logos\n- Decision: Logos checked feasibility.\n\n### 2026-05-16 - Human consensus approval\n- Status: accepted\n- Actor: human\n- Source: consensus\n- Decision: Build approved work.\n\n### 2026-05-16 - Logos spec self-review\n- Status: accepted\n- Actor: logos\n- Source: spec-self-review\n- Decision: Spec is ready.\n\n### 2026-05-16 - Human spec review\n- Status: accepted\n- Actor: human\n- Source: spec-review\n- Decision: Spec approved.\n\n### 2026-05-16 - Human plan review\n- Status: accepted\n- Actor: human\n- Source: plan-review\n- Decision: Plan approved.\n", encoding="utf-8")
+            run_root = project_dir / ".yolo"
+            run_root.mkdir(parents=True, exist_ok=True)
+            (run_root / "human_approvals.json").write_text('[{"source":"consensus","answer":"Build approved work.","recorded_by":"main-session"},{"source":"spec-review","answer":"Spec approved.","recorded_by":"main-session"},{"source":"plan-review","answer":"Plan approved.","recorded_by":"main-session"}]\n', encoding="utf-8")
+            (docs_dir / "spec.md").write_text("# Spec\n\nStatus: approved\n\n## Acceptance Criteria\n- Review passes.\n", encoding="utf-8")
+            (docs_dir / "plan.md").write_text("# Plan\n\nStatus: approved\n\n## Steps\n1. Step: run execution.\n   Files: workflow/preflight.py\n   Run: python3 -m unittest discover -s repo/tests -p 'test_preflight.py'\n   Expected: PASS\n   Verify: tests pass.\n\n## Rollback / Safety\n- Revert preflight changes.\n", encoding="utf-8")
+
+            result = self.run_default_preflight(
+                project_dir,
+                goal="Run from default planning docs.",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["classification"], "planning_needed")
+            self.assertEqual(payload["action"], "await_human_approval")
+            self.assertIn('"status": "ask_user"', payload["blocked_on"])
+            self.assertIn("approval", payload["next"].lower())
+            self.assertTrue(payload["human_required"])
+
     def test_preflight_reports_repair_state_when_trace_exists_without_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)

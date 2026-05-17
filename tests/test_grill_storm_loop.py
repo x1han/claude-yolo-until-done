@@ -238,6 +238,39 @@ class GrillStormLoopTest(unittest.TestCase):
             rounds = load_planning_rounds(project_dir / ".yolo")
             self.assertEqual(rounds[0]["summary"], "Recorded preflight ownership decision.")
 
+    def test_record_round_result_is_idempotent_for_same_role_invocation_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            self.write_docs(project_dir)
+            run_root = project_dir / ".yolo"
+            dispatch = run_planning_step(project_dir, run_root=run_root)["dispatch_request"]
+            result = {
+                "role": "muse",
+                "round": 1,
+                "status": "completed",
+                "docs_touched": ["docs/decisions.md"],
+                "summary": "Recorded preflight ownership decision.",
+                "decisions_recorded": ["Preflight owns execution readiness."],
+                "questions_added": [],
+                "next_recommendation": "Logos should compare options.",
+            }
+
+            from agent_sessions import load_planning_rounds
+            from grill_storm_loop import record_round_result
+
+            first = record_round_result(dispatch, result, now="2026-05-11T02:00:00+00:00")
+            result["summary"] = "Retry returned slightly different prose."
+            result["decisions_recorded"] = ["Duplicate retry decision should not append."]
+            second = record_round_result(dispatch, result, now="2026-05-11T02:01:00+00:00")
+
+            rounds = load_planning_rounds(run_root)
+            self.assertEqual(first, second)
+            self.assertEqual(len(rounds), 1)
+            self.assertEqual(rounds[0]["summary"], "Recorded preflight ownership decision.")
+            decisions = (project_dir / "docs" / "decisions.md").read_text(encoding="utf-8")
+            self.assertEqual(decisions.count("Preflight owns execution readiness."), 1)
+            self.assertNotIn("Duplicate retry decision should not append.", decisions)
+
     def test_blocked_round_does_not_count_as_internal_progress(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_dir = Path(tmp)

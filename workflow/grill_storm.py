@@ -15,6 +15,21 @@ SPEC_TEMPLATE_MARKER = "Planning needs hard docs-first contract."
 PLAN_TEMPLATE_MARKER = "Implement hard gate."
 
 
+def artifact_path(docs_dir_arg: str, filename: str) -> str:
+    return str(Path(docs_dir_arg) / filename)
+
+
+def human_review_payload(status: str, artifact_path: str, review_kind: str, summary: str, next_step: str) -> dict[str, object]:
+    return {
+        "status": status,
+        "human_allowed": True,
+        "artifact_path": artifact_path,
+        "review": f"{review_kind} path: {artifact_path}\nSimple summary: {summary}\n{next_step}",
+        "source": artifact_path,
+        "max_questions": 1,
+    }
+
+
 def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, object]:
     try:
         root, bundle = read_bundle(project_dir, docs_dir_arg)
@@ -152,32 +167,32 @@ def status_payload(project_dir: Path, docs_dir_arg: str = "docs") -> dict[str, o
         }
 
     if spec_self_reviewed and not human_spec_reviewed and spec_status in {"self-reviewed", "approved"}:
-        return {
-            "status": "human_spec_review",
-            "human_allowed": True,
-            "review": "Review docs/spec.md and record accepted human decision with Source: spec-review before planning.",
-            "source": "docs/spec.md",
-            "max_questions": 1,
-        }
+        return human_review_payload(
+            "human_spec_review",
+            artifact_path(docs_dir_arg, "spec.md"),
+            "Spec",
+            "Review spec before plan authoring.",
+            "Record accepted human decision with Source: spec-review before planning.",
+        )
 
     if spec_status == "approved" and human_spec_reviewed and plan_status == "approved" and not human_plan_reviewed:
-        return {
-            "status": "human_plan_review",
-            "human_allowed": True,
-            "review": "Review docs/plan.md and record accepted human decision with Source: plan-review before execution.",
-            "source": "docs/plan.md",
-            "max_questions": 1,
-        }
+        return human_review_payload(
+            "human_plan_review",
+            artifact_path(docs_dir_arg, "plan.md"),
+            "Plan",
+            "Review plan before execution.",
+            "Record accepted human decision with Source: plan-review before execution.",
+        )
 
     if spec_status == "approved" and human_spec_reviewed and plan_status == "draft" and not human_plan_reviewed:
         if not plan_quality_errors(bundle["plan"]) and PLAN_TEMPLATE_MARKER not in bundle["plan"]:
-            return {
-                "status": "human_plan_review",
-                "human_allowed": True,
-                "review": "Review docs/plan.md and record accepted human decision with Source: plan-review before execution.",
-                "source": "docs/plan.md",
-                "max_questions": 1,
-            }
+            return human_review_payload(
+                "human_plan_review",
+                artifact_path(docs_dir_arg, "plan.md"),
+                "Plan",
+                "Review plan before execution.",
+                "Record accepted human decision with Source: plan-review before execution.",
+            )
         return {
             "status": "needs_plan_authoring",
             "next_actor": "logos",

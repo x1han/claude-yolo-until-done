@@ -203,14 +203,43 @@ def missing_default_docs_payload(project_dir: Path) -> dict:
 
 
 def planning_not_ready_payload(project_dir: Path, detail: str) -> dict:
+    lower_detail = detail.lower()
+    needs_planning = any(
+        marker in lower_detail
+        for marker in (
+            "missing accepted muse",
+            "missing accepted logos",
+            "missing accepted logos spec self-review",
+            "still contains template-only",
+            "still contains blocking",
+            "missing acceptance criteria",
+            "missing implementation steps",
+            "forbidden placeholder marker",
+            "missing exact files",
+            "missing exact commands",
+            "missing expected outputs",
+            "plan.md is missing",
+            "next_actor",
+        )
+    )
+    explicit_human_status = any(
+        marker in lower_detail for marker in ("human_spec_review", "human_plan_review", "human_dialogue", '"status": "ask_user"')
+    )
+    approval_only_blocker = (
+        "missing accepted human" in lower_detail
+        or "missing verified human" in lower_detail
+        or "main session must ask the human" in lower_detail
+    )
+    human_required = explicit_human_status or approval_only_blocker
+    await_human_approval = explicit_human_status or (approval_only_blocker and not needs_planning)
     return {
         "classification": "planning_needed",
-        "action": "continue_planning",
+        "action": "await_human_approval" if await_human_approval else "continue_planning",
         "current_state": "First-party grill-storm planning docs exist but are not execution-ready.",
         "evidence": str((project_dir / "docs").resolve()),
         "blocked_on": detail,
-        "next": "Continue skills/grill-storm planning or record required human approval before execution.",
-        "human_required": "human_" in detail or "human " in detail,
+        "next": "Record required human approval before execution." if await_human_approval else "Continue skills/grill-storm planning before execution.",
+        "human_required": human_required,
     }
 
 
