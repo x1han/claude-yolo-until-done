@@ -39,9 +39,9 @@ python <skill-repo>/workflow/preflight.py \
   --success-criterion "Workflow reaches valid completion."
 ```
 
-Default is acyclic mode: execute the approved spec/plan once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit. fixed loop N means N complete acyclic executions; convergence-only loop uses default max 10. do not pre-plan future loop iterations.
+Default is acyclic mode: execute the approved spec/plan once. Loop mode must repeat the same complete approved spec/plan as the acyclic execution unit. fixed loop N means N complete acyclic executions; convergence-only loop uses default max 10; do not pre-plan future loop iterations.
 
-Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit: `task-001`, titled `Execute approved spec and plan`, with the complete approved spec/plan text. Parsed plan sections are review context only and must not become loop iterations. The controller derives loop `selected_work` from this authoritative task input; operators and workers do not choose it with CLI text.
 
 For loop mode, preflight with a stop policy:
 

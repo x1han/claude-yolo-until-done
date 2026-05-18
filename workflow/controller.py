@@ -122,17 +122,18 @@ def update_loop_submission_evidence(state: dict, args: argparse.Namespace, times
     unit_problem = loop_execution_unit_problem(state)
     require(not unit_problem, unit_problem)
 
-    require(args.loop_selected_work is not None, "--loop-selected-work is required for loop submit.")
     require(args.loop_evidence, "--loop-evidence is required for loop submit.")
     require(args.acceleration_decision is not None, "--acceleration-decision is required for loop submit.")
     require(args.acceleration_evidence, "--acceleration-evidence is required for loop submit.")
     require(args.gate_safety_basis, "--gate-safety-basis is required for loop submit.")
 
+    task_inputs = state["task_inputs"]
+    selected_work = task_inputs["task_title"]
     iteration = loop.get("iteration")
     loop["converged"] = bool(args.loop_converged)
     loop["latest_iteration_evidence"] = {
         "iteration": iteration,
-        "selected_work": args.loop_selected_work,
+        "selected_work": selected_work,
         "worker_claim": args.worker_claim,
         "files_changed": list(args.files_changed or []),
         "verification_command": args.verification_command,

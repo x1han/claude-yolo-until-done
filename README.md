@@ -104,9 +104,9 @@ That creates:
 - `<run-root>/state.json`
 - `<run-root>/trace.md`
 
-Default execution mode is acyclic: one approved spec/plan run reaches cleanup. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit until one stop policy fires. fixed loop N means N complete acyclic executions. Convergence-only loops use default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations.
+Default execution mode is acyclic: one approved spec/plan run reaches cleanup. Loop mode must repeat the same complete approved spec/plan as the acyclic execution unit until one stop policy fires. fixed loop N means N complete acyclic executions. Convergence-only loops use default max 10. Each iteration rereads current state and evidence; do not pre-plan future loop iterations.
 
-Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit: `task-001`, titled `Execute approved spec and plan`, with the complete approved spec/plan text. Parsed plan sections are review context only and must not become loop iterations. The controller derives loop `selected_work` from this authoritative task input; operators and workers do not choose it with CLI text.
 
 Loop mode repeats the same acyclic core until one stop policy fires:
 

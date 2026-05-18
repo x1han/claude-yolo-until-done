@@ -181,6 +181,7 @@ class ControllerReviewFlowTest(unittest.TestCase):
             self.assertEqual(state["verification_result"], "")
             self.assertEqual(state["loop"]["latest_iteration_evidence"], {})
             self.assertEqual(state["loop"]["iteration_evidence"][0]["iteration"], 1)
+            self.assertEqual(state["loop"]["iteration_evidence"][0]["selected_work"], "Execute approved spec and plan")
             self.assertEqual(state["loop"]["iteration_evidence"][0]["review_verdict"], "approve")
             self.assertEqual(state["loop"]["iteration_evidence"][0]["acceleration_review"]["decision"], "defer")
             registry = json.loads((run_root / "agent_sessions.json").read_text(encoding="utf-8"))

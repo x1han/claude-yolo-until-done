@@ -26,11 +26,11 @@ These files do not override `state.json`. If they are missing, runtime may recre
 
 ## Execution unit
 
-`task_inputs` is one authoritative execution unit for the run. It contains the complete approved spec/plan that worker and watcher use for the acyclic lifecycle. Parsed plan headings may appear as derived review context, but they are not schedulable runtime tasks.
+`task_inputs` is one authoritative execution unit for the run. It contains the complete approved spec/plan that worker and watcher use for the acyclic lifecycle. In loop mode this unit must be `task-001`, titled `Execute approved spec and plan`, with the complete approved spec/plan text. Parsed plan headings may appear as derived review context, but they are not schedulable runtime tasks.
 
-Acyclic mode executes this unit once. Loop mode: repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence, then executes the complete unit again or stops by policy. Agents and operators must not pre-plan future loop iterations or treat parsed plan sections as loop slices; do not pre-plan future loop iterations.
+Acyclic mode executes this unit once. Loop mode must repeat the same complete approved spec/plan as the acyclic execution unit; fixed loop N means N complete acyclic executions. Convergence-only loop uses default max 10. Each iteration rereads current state and evidence, then executes the complete unit again or stops by policy; do not pre-plan future loop iterations or treat parsed plan sections as loop slices.
 
-Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit; parsed plan sections are review context only and must not become loop iterations.
+Loop mode must keep `task_inputs` pointed at the complete approved spec/plan execution unit. The controller derives loop `selected_work` from authoritative `task_inputs`; operators and workers do not choose it with CLI text. Parsed plan sections are review context only and must not become loop iterations.
 
 ## Required `state.json` fields
 

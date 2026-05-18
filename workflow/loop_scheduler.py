@@ -6,11 +6,18 @@ WHOLE_EXECUTION_TITLE = "Execute approved spec and plan"
 
 
 def loop_execution_unit_problem(state: dict) -> str:
-    if state.get("mode", "acyclic") != "loop":
-        return ""
     loop = state.get("loop")
-    if not isinstance(loop, dict) or not loop.get("enabled"):
+    loop_enabled = loop.get("enabled") if isinstance(loop, dict) else False
+    if state.get("mode", "acyclic") != "loop":
+        if loop_enabled:
+            return "loop enabled outside loop mode"
         return ""
+    if not isinstance(loop, dict):
+        return "loop state missing for loop mode"
+    if not isinstance(loop_enabled, bool):
+        return "loop enabled flag must be boolean"
+    if not loop_enabled:
+        return "loop mode requires enabled loop state"
     task_inputs = state.get("task_inputs")
     if not isinstance(task_inputs, dict) or not task_inputs:
         return "loop task_inputs missing complete approved spec/plan execution unit"
@@ -34,6 +41,10 @@ def loop_execution_unit_problem(state: dict) -> str:
 
 
 def loop_decision(state: dict) -> dict:
+    unit_problem = loop_execution_unit_problem(state)
+    if unit_problem:
+        return {"action": "stop", "reason": "invalid_loop_state"}
+
     if state.get("mode", "acyclic") != "loop":
         return {"action": "not_loop", "reason": "mode is acyclic"}
 
